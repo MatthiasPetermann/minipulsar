@@ -702,61 +702,93 @@ func (b *broker) handleFlow(conn net.Conn, base *pulsar.BaseCommand) error {
 }
 
 func (b *broker) handleAck(conn net.Conn, base *pulsar.BaseCommand) error {
-	cmd := base.GetAck()
-	if cmd == nil {
-		return fmt.Errorf("ACK without payload")
-	}
+cmd := base.GetAck()
+if cmd == nil {
+return fmt.Errorf("ACK without payload")
+}
 
-	consumerID := cmd.GetConsumerId()
-	b.mu.RLock()
-	c := b.consumers[consumerID]
-	b.mu.RUnlock()
-	if c == nil {
-		// Might happen after close/race; just ignore.
-		return nil
-	}
 
-	topic := c.topic
-	sub := c.subscription
+consumerID := cmd.GetConsumerId()
+b.mu.RLock()
+c := b.consumers[consumerID]
+b.mu.RUnlock()
+if c == nil {
+// Consumer already gone
+return nil
+}
 
-	ids := cmd.GetMessageId()
-	if len(ids) == 0 {
-		log.Printf("ACK consumer=%d type=%v (#ids=0)", consumerID, cmd.GetAckType())
-		return nil
-	}
 
-	// Minimal: treat all as individual acks.
-	tx, err := b.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
+topic := c.topic
+sub := c.subscription
 
-	for _, mid := range ids {
-		msgID := int64(mid.GetEntryId())
-		if _, err := tx.Exec(
-			"DELETE FROM subscription_pending WHERE topic=? AND name=? AND message_id=?",
-			topic, sub, msgID,
-		); err != nil {
-			return err
-		}
-	}
 
-	// Advance cursor greedily over non-pending existing messages
-	if err := b.txAdvanceCursor(tx, topic, sub); err != nil {
-		return err
-	}
+ids := cmd.GetMessageId()
+if len(ids) == 0 {
+log.Printf("ACK consumer=%d type=%v (#ids=0)", consumerID, cmd.GetAckType())
+return nil
+}
 
-	if err := tx.Commit(); err != nil {
-		return err
-	}
 
-	log.Printf("ACK consumer=%d type=%v (#ids=%d) topic=%s sub=%s", consumerID, cmd.GetAckType(), len(ids), topic, sub)
+tx, err := b.db.Begin()
+if err != nil {
+return err
+}
+defer func() { _ = tx.Rollback() }()
 
-	// After ack, we might be able to deliver more if permits exist
-	s := b.getOrCreateSubState(topic, sub)
-	b.maybeStartSubDelivery(s)
-	return nil
+
+switch cmd.GetAckType() {
+case pulsar.CommandAck_Individual:
+for _, mid := range ids {
+msgID := int64(mid.GetEntryId())
+if _, err := tx.Exec(
+"DELETE FROM subscription_pending WHERE topic=? AND name=? AND message_id=?",
+topic, sub, msgID,
+); err != nil {
+return err
+}
+}
+
+
+case pulsar.CommandAck_Cumulative:
+// Pulsar semantics: all messages <= entryId are acked
+if len(ids) != 1 {
+return fmt.Errorf("invalid cumulative ack: %d ids", len(ids))
+}
+upto := int64(ids[0].GetEntryId())
+if _, err := tx.Exec(
+"DELETE FROM subscription_pending WHERE topic=? AND name=? AND message_id <= ?",
+topic, sub, upto,
+); err != nil {
+return err
+}
+
+
+default:
+log.Printf("ACK consumer=%d unsupported type=%v", consumerID, cmd.GetAckType())
+}
+
+
+// Advance cursor after ack
+if err := b.txAdvanceCursor(tx, topic, sub); err != nil {
+return err
+}
+
+
+if err := tx.Commit(); err != nil {
+return err
+}
+
+
+log.Printf("ACK consumer=%d type=%v (#ids=%d) topic=%s sub=%s",
+consumerID, cmd.GetAckType(), len(ids), topic, sub)
+
+
+// Try delivering more if permits allow
+s := b.getOrCreateSubState(topic, sub)
+b.maybeStartSubDelivery(s)
+
+
+return nil
 }
 
 func (b *broker) handlePing(conn net.Conn, base *pulsar.BaseCommand) error {
