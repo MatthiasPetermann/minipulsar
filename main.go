@@ -45,6 +45,9 @@ type consumer struct {
 
 	mu            sync.Mutex
 	nextMessageID int64 // sqlite row id to start from
+
+	permits       int // <- NEU: verbleibende Credits
+    delivering    bool // <- optional: verhindert parallele Deliver-Loops
 }
 
 type storedMessage struct {
@@ -382,6 +385,8 @@ func (b *broker) handleSend(conn net.Conn, base *pulsar.BaseCommand, payloadSect
 		return fmt.Errorf("insert message: %w", err)
 	}
 
+	b.kickConsumers(p.topic)
+
 	log.Printf("SEND topic=%s producer=%d msgID=%d size=%d", p.topic, producerID, msg.id, len(payload))
 
 	resp := &pulsar.BaseCommand{
@@ -398,26 +403,101 @@ func (b *broker) handleSend(conn net.Conn, base *pulsar.BaseCommand, payloadSect
 	return writeSimpleCommand(conn, resp)
 }
 
+func (b *broker) kickConsumers(topic string) {
+    b.mu.RLock()
+    // Snapshot, damit wir nicht unter Lock ins Netzwerk schreiben
+    var list []*consumer
+    for _, c := range b.consumers {
+        if c.topic == topic {
+            list = append(list, c)
+        }
+    }
+    b.mu.RUnlock()
+
+    for _, c := range list {
+        c.mu.Lock()
+        if c.permits > 0 && !c.delivering {
+            c.delivering = true
+            c.mu.Unlock()
+            go b.deliveryLoop(c)
+            continue
+        }
+        c.mu.Unlock()
+    }
+}
+
+
 func (b *broker) handleFlow(conn net.Conn, base *pulsar.BaseCommand) error {
-	cmd := base.GetFlow()
-	if cmd == nil {
-		return fmt.Errorf("FLOW without payload")
-	}
-	consumerID := cmd.GetConsumerId()
-	permits := cmd.GetMessagePermits()
-	if permits == 0 {
-		return nil
-	}
+ cmd := base.GetFlow()
+    if cmd == nil {
+        return fmt.Errorf("FLOW without payload")
+    }
+    consumerID := cmd.GetConsumerId()
+    add := int(cmd.GetMessagePermits())
+    if add <= 0 {
+        return nil
+    }
 
-	b.mu.RLock()
-	c := b.consumers[consumerID]
-	b.mu.RUnlock()
-	if c == nil {
-		return fmt.Errorf("FLOW for unknown consumer %d", consumerID)
-	}
+    b.mu.RLock()
+    c := b.consumers[consumerID]
+    b.mu.RUnlock()
+    if c == nil {
+        return fmt.Errorf("FLOW for unknown consumer %d", consumerID)
+    }
 
-	log.Printf("FLOW consumer=%d permits=%d", consumerID, permits)
-	return b.deliverMessages(c, int(permits))
+    c.mu.Lock()
+    c.permits += add
+    // Start delivery loop once
+    if c.delivering {
+        c.mu.Unlock()
+        return nil
+    }
+    c.delivering = true
+    c.mu.Unlock()
+
+    go b.deliveryLoop(c)
+    return nil
+}
+
+func (b *broker) deliveryLoop(c *consumer) {
+    defer func() {
+        c.mu.Lock()
+        c.delivering = false
+        c.mu.Unlock()
+    }()
+
+    for {
+        c.mu.Lock()
+        permits := c.permits
+        startID := c.nextMessageID
+        c.mu.Unlock()
+
+        if permits <= 0 {
+            return
+        }
+
+        msgs, err := b.fetchMessages(c.topic, startID, permits)
+        if err != nil {
+            log.Printf("deliver fetch error consumer=%d: %v", c.id, err)
+            return
+        }
+        if len(msgs) == 0 {
+            // Nichts da -> Loop stoppen. Neue SENDs oder FLOW starten neu.
+            return
+        }
+
+        for _, m := range msgs {
+            if err := writeMessageFrame(c.conn, c.id, &m); err != nil {
+                log.Printf("deliver write error consumer=%d: %v", c.id, err)
+                return
+            }
+        }
+
+        c.mu.Lock()
+        c.nextMessageID = msgs[len(msgs)-1].id + 1
+        c.permits -= len(msgs)
+        c.mu.Unlock()
+    }
 }
 
 func (b *broker) handleAck(conn net.Conn, base *pulsar.BaseCommand) error {
