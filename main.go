@@ -25,10 +25,17 @@ const (
 )
 
 type broker struct {
-	db        *sql.DB
+	db *sql.DB
+
 	producers map[uint64]*producer
+
+	// consumers by client-provided consumer_id (assumed unique per process)
 	consumers map[uint64]*consumer
-	mu        sync.RWMutex
+
+	// subscription states keyed by (topic, subscription)
+	subs map[subKey]*subState
+
+	mu sync.RWMutex
 }
 
 type producer struct {
@@ -43,11 +50,8 @@ type consumer struct {
 	subscription string
 	conn         net.Conn
 
-	mu            sync.Mutex
-	nextMessageID int64 // sqlite row id to start from
-
-	permits       int // <- NEU: verbleibende Credits
-    delivering    bool // <- optional: verhindert parallele Deliver-Loops
+	mu      sync.Mutex
+	permits int
 }
 
 type storedMessage struct {
@@ -56,6 +60,20 @@ type storedMessage struct {
 	payload     []byte
 	sequenceID  uint64
 	publishTime int64
+}
+
+type subKey struct {
+	topic string
+	name  string
+}
+
+type subState struct {
+	key subKey
+
+	mu         sync.Mutex
+	consumers  []*consumer
+	rr         int
+	delivering bool
 }
 
 func main() {
@@ -75,6 +93,7 @@ func main() {
 		db:        db,
 		producers: make(map[uint64]*producer),
 		consumers: make(map[uint64]*consumer),
+		subs:      make(map[subKey]*subState),
 	}
 
 	ln, err := net.Listen("tcp", *addr)
@@ -95,6 +114,8 @@ func main() {
 
 func initSchema(db *sql.DB) error {
 	schema := `
+PRAGMA journal_mode=WAL;
+
 CREATE TABLE IF NOT EXISTS messages (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   topic TEXT NOT NULL,
@@ -102,13 +123,46 @@ CREATE TABLE IF NOT EXISTS messages (
   publish_time INTEGER NOT NULL,
   sequence_id INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS subscriptions (
+  topic TEXT NOT NULL,
+  name  TEXT NOT NULL,
+  type  TEXT NOT NULL DEFAULT 'shared',
+  PRIMARY KEY (topic, name)
+);
+
+CREATE TABLE IF NOT EXISTS subscription_cursor (
+  topic TEXT NOT NULL,
+  name  TEXT NOT NULL,
+  next_message_id INTEGER NOT NULL,
+  PRIMARY KEY (topic, name),
+  FOREIGN KEY (topic, name) REFERENCES subscriptions(topic, name)
+);
+
+CREATE TABLE IF NOT EXISTS subscription_pending (
+  topic TEXT NOT NULL,
+  name  TEXT NOT NULL,
+  message_id INTEGER NOT NULL,
+  consumer_id INTEGER NOT NULL,
+  delivered_at INTEGER NOT NULL,
+  PRIMARY KEY (topic, name, message_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_pending_by_sub
+  ON subscription_pending(topic, name, message_id);
+
+CREATE INDEX IF NOT EXISTS idx_messages_by_topic
+  ON messages(topic, id);
 `
 	_, err := db.Exec(schema)
 	return err
 }
 
 func (b *broker) handleConnection(conn net.Conn) {
-	defer conn.Close()
+	defer func() {
+		b.cleanupConnection(conn)
+		_ = conn.Close()
+	}()
 	remote := conn.RemoteAddr().String()
 	log.Printf("new connection from %s", remote)
 
@@ -121,6 +175,36 @@ func (b *broker) handleConnection(conn net.Conn) {
 			}
 			return
 		}
+	}
+}
+
+func (b *broker) cleanupConnection(conn net.Conn) {
+	// Remove producers/consumers bound to this conn; also clear pending for those consumers.
+	var consumerIDs []uint64
+	var producerIDs []uint64
+
+	b.mu.RLock()
+	for id, c := range b.consumers {
+		if c.conn == conn {
+			consumerIDs = append(consumerIDs, id)
+		}
+	}
+	for id, p := range b.producers {
+		if p.conn == conn {
+			producerIDs = append(producerIDs, id)
+		}
+	}
+	b.mu.RUnlock()
+
+	for _, id := range producerIDs {
+		b.mu.Lock()
+		delete(b.producers, id)
+		b.mu.Unlock()
+	}
+
+	for _, id := range consumerIDs {
+		// Best-effort close semantics
+		b.removeConsumer(id)
 	}
 }
 
@@ -283,6 +367,44 @@ func (b *broker) handleProducer(conn net.Conn, base *pulsar.BaseCommand) error {
 	return writeSimpleCommand(conn, resp)
 }
 
+func (b *broker) ensureSubscription(topic, name string) error {
+	tx, err := b.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.Exec(
+		"INSERT OR IGNORE INTO subscriptions(topic, name, type) VALUES(?, ?, 'shared')",
+		topic, name,
+	); err != nil {
+		return err
+	}
+
+	if _, err := tx.Exec(
+		"INSERT OR IGNORE INTO subscription_cursor(topic, name, next_message_id) VALUES(?, ?, 1)",
+		topic, name,
+	); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+func (b *broker) getOrCreateSubState(topic, name string) *subState {
+	key := subKey{topic: topic, name: name}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	s := b.subs[key]
+	if s == nil {
+		s = &subState{key: key}
+		b.subs[key] = s
+	}
+	return s
+}
+
 func (b *broker) handleSubscribe(conn net.Conn, base *pulsar.BaseCommand) error {
 	cmd := base.GetSubscribe()
 	if cmd == nil {
@@ -295,17 +417,33 @@ func (b *broker) handleSubscribe(conn net.Conn, base *pulsar.BaseCommand) error 
 		return fmt.Errorf("invalid subscribe: empty topic or subscription")
 	}
 
-	c := &consumer{
-		id:            consumerID,
-		topic:         topic,
-		subscription:  sub,
-		conn:          conn,
-		nextMessageID: 1,
+	if err := b.ensureSubscription(topic, sub); err != nil {
+		return fmt.Errorf("ensure subscription: %w", err)
 	}
 
+	c := &consumer{
+		id:           consumerID,
+		topic:        topic,
+		subscription: sub,
+		conn:         conn,
+	}
+
+	// Register consumer
 	b.mu.Lock()
+	if old := b.consumers[consumerID]; old != nil {
+		// If client reused consumer_id, evict old (best-effort).
+		b.mu.Unlock()
+		b.removeConsumer(consumerID)
+		b.mu.Lock()
+	}
 	b.consumers[consumerID] = c
 	b.mu.Unlock()
+
+	// Attach to subscription state
+	s := b.getOrCreateSubState(topic, sub)
+	s.mu.Lock()
+	s.consumers = append(s.consumers, c)
+	s.mu.Unlock()
 
 	log.Printf("SUBSCRIBE consumer=%d topic=%s subscription=%s", consumerID, topic, sub)
 
@@ -385,7 +523,7 @@ func (b *broker) handleSend(conn net.Conn, base *pulsar.BaseCommand, payloadSect
 		return fmt.Errorf("insert message: %w", err)
 	}
 
-	b.kickConsumers(p.topic)
+	b.kickTopic(p.topic)
 
 	log.Printf("SEND topic=%s producer=%d msgID=%d size=%d", p.topic, producerID, msg.id, len(payload))
 
@@ -403,101 +541,164 @@ func (b *broker) handleSend(conn net.Conn, base *pulsar.BaseCommand, payloadSect
 	return writeSimpleCommand(conn, resp)
 }
 
-func (b *broker) kickConsumers(topic string) {
-    b.mu.RLock()
-    // Snapshot, damit wir nicht unter Lock ins Netzwerk schreiben
-    var list []*consumer
-    for _, c := range b.consumers {
-        if c.topic == topic {
-            list = append(list, c)
-        }
-    }
-    b.mu.RUnlock()
+func (b *broker) kickTopic(topic string) {
+	// snapshot subscription states for topic
+	var subs []*subState
+	b.mu.RLock()
+	for k, s := range b.subs {
+		if k.topic == topic {
+			subs = append(subs, s)
+		}
+	}
+	b.mu.RUnlock()
 
-    for _, c := range list {
-        c.mu.Lock()
-        if c.permits > 0 && !c.delivering {
-            c.delivering = true
-            c.mu.Unlock()
-            go b.deliveryLoop(c)
-            continue
-        }
-        c.mu.Unlock()
-    }
+	for _, s := range subs {
+		b.maybeStartSubDelivery(s)
+	}
 }
 
+func (b *broker) maybeStartSubDelivery(s *subState) {
+	s.mu.Lock()
+	// already running?
+	if s.delivering {
+		s.mu.Unlock()
+		return
+	}
+	// do we have any consumer with permits?
+	ready := false
+	for _, c := range s.consumers {
+		c.mu.Lock()
+		p := c.permits
+		c.mu.Unlock()
+		if p > 0 {
+			ready = true
+			break
+		}
+	}
+	if !ready {
+		s.mu.Unlock()
+		return
+	}
+	s.delivering = true
+	s.mu.Unlock()
+
+	go b.deliveryLoopShared(s)
+}
+
+func (s *subState) nextConsumerWithPermits() *consumer {
+	n := len(s.consumers)
+	if n == 0 {
+		return nil
+	}
+	for i := 0; i < n; i++ {
+		idx := (s.rr + i) % n
+		c := s.consumers[idx]
+		c.mu.Lock()
+		p := c.permits
+		c.mu.Unlock()
+		if p > 0 {
+			s.rr = (idx + 1) % n
+			return c
+		}
+	}
+	return nil
+}
+
+func (b *broker) deliveryLoopShared(s *subState) {
+	defer func() {
+		s.mu.Lock()
+		s.delivering = false
+		s.mu.Unlock()
+	}()
+
+	// Simple batching to keep latency OK and DB load reasonable
+	const maxBatch = 200
+
+	for {
+		// Pick consumer with permits
+		s.mu.Lock()
+		c := s.nextConsumerWithPermits()
+		s.mu.Unlock()
+		if c == nil {
+			return
+		}
+
+		c.mu.Lock()
+		permits := c.permits
+		c.mu.Unlock()
+		if permits <= 0 {
+			continue
+		}
+		limit := permits
+		if limit > maxBatch {
+			limit = maxBatch
+		}
+
+		nextID, err := b.dbGetCursor(s.key.topic, s.key.name)
+		if err != nil {
+			log.Printf("deliver cursor error topic=%s sub=%s: %v", s.key.topic, s.key.name, err)
+			return
+		}
+
+		msgs, err := b.dbFetchDeliverable(s.key.topic, s.key.name, nextID, limit)
+		if err != nil {
+			log.Printf("deliver fetch error topic=%s sub=%s: %v", s.key.topic, s.key.name, err)
+			return
+		}
+		if len(msgs) == 0 {
+			return
+		}
+
+		now := time.Now().UnixMilli()
+
+		for _, m := range msgs {
+			// Mark pending first; if send fails, we revert it.
+			if err := b.dbInsertPending(s.key.topic, s.key.name, m.id, int64(c.id), now); err != nil {
+				log.Printf("pending insert error topic=%s sub=%s msg=%d: %v", s.key.topic, s.key.name, m.id, err)
+				return
+			}
+
+			if err := writeMessageFrame(c.conn, c.id, &m); err != nil {
+				_ = b.dbDeletePending(s.key.topic, s.key.name, m.id)
+				log.Printf("deliver write error consumer=%d: %v", c.id, err)
+				return
+			}
+
+			c.mu.Lock()
+			if c.permits > 0 {
+				c.permits--
+			}
+			c.mu.Unlock()
+		}
+	}
+}
 
 func (b *broker) handleFlow(conn net.Conn, base *pulsar.BaseCommand) error {
- cmd := base.GetFlow()
-    if cmd == nil {
-        return fmt.Errorf("FLOW without payload")
-    }
-    consumerID := cmd.GetConsumerId()
-    add := int(cmd.GetMessagePermits())
-    if add <= 0 {
-        return nil
-    }
+	cmd := base.GetFlow()
+	if cmd == nil {
+		return fmt.Errorf("FLOW without payload")
+	}
+	consumerID := cmd.GetConsumerId()
+	add := int(cmd.GetMessagePermits())
+	if add <= 0 {
+		return nil
+	}
 
-    b.mu.RLock()
-    c := b.consumers[consumerID]
-    b.mu.RUnlock()
-    if c == nil {
-        return fmt.Errorf("FLOW for unknown consumer %d", consumerID)
-    }
+	b.mu.RLock()
+	c := b.consumers[consumerID]
+	b.mu.RUnlock()
+	if c == nil {
+		return fmt.Errorf("FLOW for unknown consumer %d", consumerID)
+	}
 
-    c.mu.Lock()
-    c.permits += add
-    // Start delivery loop once
-    if c.delivering {
-        c.mu.Unlock()
-        return nil
-    }
-    c.delivering = true
-    c.mu.Unlock()
+	c.mu.Lock()
+	c.permits += add
+	c.mu.Unlock()
 
-    go b.deliveryLoop(c)
-    return nil
-}
-
-func (b *broker) deliveryLoop(c *consumer) {
-    defer func() {
-        c.mu.Lock()
-        c.delivering = false
-        c.mu.Unlock()
-    }()
-
-    for {
-        c.mu.Lock()
-        permits := c.permits
-        startID := c.nextMessageID
-        c.mu.Unlock()
-
-        if permits <= 0 {
-            return
-        }
-
-        msgs, err := b.fetchMessages(c.topic, startID, permits)
-        if err != nil {
-            log.Printf("deliver fetch error consumer=%d: %v", c.id, err)
-            return
-        }
-        if len(msgs) == 0 {
-            // Nichts da -> Loop stoppen. Neue SENDs oder FLOW starten neu.
-            return
-        }
-
-        for _, m := range msgs {
-            if err := writeMessageFrame(c.conn, c.id, &m); err != nil {
-                log.Printf("deliver write error consumer=%d: %v", c.id, err)
-                return
-            }
-        }
-
-        c.mu.Lock()
-        c.nextMessageID = msgs[len(msgs)-1].id + 1
-        c.permits -= len(msgs)
-        c.mu.Unlock()
-    }
+	// Start / wake subscription delivery
+	s := b.getOrCreateSubState(c.topic, c.subscription)
+	b.maybeStartSubDelivery(s)
+	return nil
 }
 
 func (b *broker) handleAck(conn net.Conn, base *pulsar.BaseCommand) error {
@@ -505,7 +706,56 @@ func (b *broker) handleAck(conn net.Conn, base *pulsar.BaseCommand) error {
 	if cmd == nil {
 		return fmt.Errorf("ACK without payload")
 	}
-	log.Printf("ACK consumer=%d type=%v (#ids=%d)", cmd.GetConsumerId(), cmd.GetAckType(), len(cmd.GetMessageId()))
+
+	consumerID := cmd.GetConsumerId()
+	b.mu.RLock()
+	c := b.consumers[consumerID]
+	b.mu.RUnlock()
+	if c == nil {
+		// Might happen after close/race; just ignore.
+		return nil
+	}
+
+	topic := c.topic
+	sub := c.subscription
+
+	ids := cmd.GetMessageId()
+	if len(ids) == 0 {
+		log.Printf("ACK consumer=%d type=%v (#ids=0)", consumerID, cmd.GetAckType())
+		return nil
+	}
+
+	// Minimal: treat all as individual acks.
+	tx, err := b.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	for _, mid := range ids {
+		msgID := int64(mid.GetEntryId())
+		if _, err := tx.Exec(
+			"DELETE FROM subscription_pending WHERE topic=? AND name=? AND message_id=?",
+			topic, sub, msgID,
+		); err != nil {
+			return err
+		}
+	}
+
+	// Advance cursor greedily over non-pending existing messages
+	if err := b.txAdvanceCursor(tx, topic, sub); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	log.Printf("ACK consumer=%d type=%v (#ids=%d) topic=%s sub=%s", consumerID, cmd.GetAckType(), len(ids), topic, sub)
+
+	// After ack, we might be able to deliver more if permits exist
+	s := b.getOrCreateSubState(topic, sub)
+	b.maybeStartSubDelivery(s)
 	return nil
 }
 
@@ -557,31 +807,124 @@ func (b *broker) fetchMessages(topic string, fromID int64, limit int) ([]storedM
 	return res, rows.Err()
 }
 
-func (b *broker) deliverMessages(c *consumer, limit int) error {
-	c.mu.Lock()
-	startID := c.nextMessageID
-	c.mu.Unlock()
+func (b *broker) dbGetCursor(topic, sub string) (int64, error) {
+	var next int64
+	err := b.db.QueryRow(
+		"SELECT next_message_id FROM subscription_cursor WHERE topic=? AND name=?",
+		topic, sub,
+	).Scan(&next)
+	if err == sql.ErrNoRows {
+		// Should not happen due to ensureSubscription; create lazily.
+		if err2 := b.ensureSubscription(topic, sub); err2 != nil {
+			return 0, err2
+		}
+		return 1, nil
+	}
+	return next, err
+}
 
-	msgs, err := b.fetchMessages(c.topic, startID, limit)
+func (b *broker) dbFetchDeliverable(topic, sub string, fromID int64, limit int) ([]storedMessage, error) {
+	rows, err := b.db.Query(
+		`SELECT m.id, m.topic, m.payload, m.publish_time, m.sequence_id
+		 FROM messages m
+		 WHERE m.topic = ?
+		   AND m.id >= ?
+		   AND NOT EXISTS (
+			 SELECT 1 FROM subscription_pending p
+			 WHERE p.topic = ? AND p.name = ? AND p.message_id = m.id
+		   )
+		 ORDER BY m.id
+		 LIMIT ?`,
+		topic, fromID, topic, sub, limit,
+	)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if len(msgs) == 0 {
-		return nil
-	}
+	defer rows.Close()
 
-	for _, m := range msgs {
-		if err := writeMessageFrame(c.conn, c.id, &m); err != nil {
+	var res []storedMessage
+	for rows.Next() {
+		var m storedMessage
+		if err := rows.Scan(&m.id, &m.topic, &m.payload, &m.publishTime, &m.sequenceID); err != nil {
+			return nil, err
+		}
+		res = append(res, m)
+	}
+	return res, rows.Err()
+}
+
+func (b *broker) dbInsertPending(topic, sub string, msgID int64, consumerID int64, deliveredAt int64) error {
+	_, err := b.db.Exec(
+		"INSERT OR IGNORE INTO subscription_pending(topic, name, message_id, consumer_id, delivered_at) VALUES(?,?,?,?,?)",
+		topic, sub, msgID, consumerID, deliveredAt,
+	)
+	return err
+}
+
+func (b *broker) dbDeletePending(topic, sub string, msgID int64) error {
+	_, err := b.db.Exec(
+		"DELETE FROM subscription_pending WHERE topic=? AND name=? AND message_id=?",
+		topic, sub, msgID,
+	)
+	return err
+}
+
+func (b *broker) txAdvanceCursor(tx *sql.Tx, topic, sub string) error {
+	// Read current cursor
+	var cur int64
+	if err := tx.QueryRow(
+		"SELECT next_message_id FROM subscription_cursor WHERE topic=? AND name=?",
+		topic, sub,
+	).Scan(&cur); err != nil {
+		if err == sql.ErrNoRows {
+			// create cursor row
+			if _, err2 := tx.Exec(
+				"INSERT OR IGNORE INTO subscription_cursor(topic,name,next_message_id) VALUES(?,?,1)",
+				topic, sub,
+			); err2 != nil {
+				return err2
+			}
+			cur = 1
+		} else {
 			return err
 		}
 	}
 
-	c.mu.Lock()
-	c.nextMessageID = msgs[len(msgs)-1].id + 1
-	c.mu.Unlock()
+	// Move forward while:
+	// - message exists at cur
+	// - and it's not pending
+	for {
+		var exists int
+		if err := tx.QueryRow(
+			"SELECT 1 FROM messages WHERE topic=? AND id=? LIMIT 1",
+			topic, cur,
+		).Scan(&exists); err != nil {
+			if err == sql.ErrNoRows {
+				break
+			}
+			return err
+		}
 
-	log.Printf("delivered %d messages to consumer=%d topic=%s", len(msgs), c.id, c.topic)
-	return nil
+		var pending int
+		if err := tx.QueryRow(
+			"SELECT 1 FROM subscription_pending WHERE topic=? AND name=? AND message_id=? LIMIT 1",
+			topic, sub, cur,
+		).Scan(&pending); err == nil {
+			// still pending -> stop
+			break
+		} else if err != sql.ErrNoRows {
+			return err
+		}
+
+		// not pending -> advance
+		cur++
+	}
+
+	_, err := tx.Exec(
+		"UPDATE subscription_cursor SET next_message_id=? WHERE topic=? AND name=?",
+		cur, topic, sub,
+	)
+	return err
 }
 
 func writeSimpleCommand(w io.Writer, cmd *pulsar.BaseCommand) error {
@@ -692,12 +1035,10 @@ func (b *broker) handleCloseProducer(conn net.Conn, base *pulsar.BaseCommand) er
 	}
 	log.Printf("CLOSE_PRODUCER producer=%d", cmd.GetProducerId())
 
-	// Optional: interne Producer-Map aufräumen
 	b.mu.Lock()
 	delete(b.producers, cmd.GetProducerId())
 	b.mu.Unlock()
 
-	// Antwort: SUCCESS(request_id)
 	resp := &pulsar.BaseCommand{
 		Type: pulsar.BaseCommand_SUCCESS.Enum(),
 		Success: &pulsar.CommandSuccess{
@@ -707,6 +1048,54 @@ func (b *broker) handleCloseProducer(conn net.Conn, base *pulsar.BaseCommand) er
 	return writeSimpleCommand(conn, resp)
 }
 
+func (b *broker) removeConsumer(consumerID uint64) {
+	var c *consumer
+
+	b.mu.Lock()
+	c = b.consumers[consumerID]
+	delete(b.consumers, consumerID)
+	b.mu.Unlock()
+
+	if c == nil {
+		return
+	}
+
+	// Remove from subState list
+	key := subKey{topic: c.topic, name: c.subscription}
+	b.mu.RLock()
+	s := b.subs[key]
+	b.mu.RUnlock()
+	if s != nil {
+		s.mu.Lock()
+		dst := s.consumers[:0]
+		for _, x := range s.consumers {
+			if x.id != consumerID {
+				dst = append(dst, x)
+			}
+		}
+		s.consumers = dst
+		s.mu.Unlock()
+	}
+
+	// Best-effort: drop pending for this consumer (avoids wedging the cursor)
+	_, _ = b.db.Exec(
+		"DELETE FROM subscription_pending WHERE topic=? AND name=? AND consumer_id=?",
+		c.topic, c.subscription, int64(c.id),
+	)
+
+	// Try advancing cursor after removing pending
+	tx, err := b.db.Begin()
+	if err == nil {
+		_ = b.txAdvanceCursor(tx, c.topic, c.subscription)
+		_ = tx.Commit()
+	}
+
+	// Trigger delivery (might unblock)
+	if s != nil {
+		b.maybeStartSubDelivery(s)
+	}
+}
+
 func (b *broker) handleCloseConsumer(conn net.Conn, base *pulsar.BaseCommand) error {
 	cmd := base.GetCloseConsumer()
 	if cmd == nil {
@@ -714,12 +1103,8 @@ func (b *broker) handleCloseConsumer(conn net.Conn, base *pulsar.BaseCommand) er
 	}
 	log.Printf("CLOSE_CONSUMER consumer=%d", cmd.GetConsumerId())
 
-	// Optional: interne Consumer-Map aufräumen
-	b.mu.Lock()
-	delete(b.consumers, cmd.GetConsumerId())
-	b.mu.Unlock()
+	b.removeConsumer(cmd.GetConsumerId())
 
-	// Antwort: SUCCESS(request_id)
 	resp := &pulsar.BaseCommand{
 		Type: pulsar.BaseCommand_SUCCESS.Enum(),
 		Success: &pulsar.CommandSuccess{
