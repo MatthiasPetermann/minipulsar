@@ -34,7 +34,7 @@ echten Pulsar-Cluster.
 - `pb/PulsarApi.proto`
   - Vollständige Pulsar-Protokolldefinition (Apache 2.0, mit `go_package`-Option)
   - Wird per `protoc-gen-go` nach `pb/PulsarApi.pb.go` generiert
-- `cmd/minipulsar/main.go`
+- `main.go`
   - Implementiert einen minimalen Broker mit:
     - TCP-Server
     - Protokoll-Decoder
@@ -63,13 +63,13 @@ make            # ruft generate + go build ./... auf
 Der Broker liegt anschließend z. B. unter:
 
 ```bash
-./cmd/minipulsar/minipulsar
+./minipulsar
 ```
 
 ## Start
 
 ```bash
-./cmd/minipulsar/minipulsar -addr :6650 -db ./minipulsar.db
+./minipulsar -addr :6650 -db ./minipulsar.db
 ```
 
 - `-addr` – Listen-Adresse für das Pulsar-Binärprotokoll
