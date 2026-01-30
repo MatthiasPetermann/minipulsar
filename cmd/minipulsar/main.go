@@ -12,6 +12,7 @@ import (
 
 	"minipulsar/internal/broker"
 	"minipulsar/internal/storage"
+	"minipulsar/internal/tui"
 )
 
 // CLI wiring lives here so application concerns stay outside core broker logic.
@@ -25,6 +26,7 @@ func main() {
 	logLevel := flag.String("log-level", "info", "log level (trace, debug, info, warn, error)")
 	logFormat := flag.String("log-format", "text", "log format (text or json)")
 	logTimestamp := flag.Bool("log-timestamp", true, "include timestamps in log output")
+	enableTUI := flag.Bool("tui", false, "enable synthwave TUI dashboard")
 	flag.Parse()
 
 	logger := logrus.New()
@@ -37,15 +39,17 @@ func main() {
 	logger.SetOutput(os.Stdout)
 	logger.SetReportCaller(false)
 
+	var formatter logrus.Formatter
 	switch strings.ToLower(*logFormat) {
 	case "text":
-		logger.SetFormatter(&logrus.TextFormatter{FullTimestamp: *logTimestamp})
+		formatter = &logrus.TextFormatter{FullTimestamp: *logTimestamp}
 	case "json":
-		logger.SetFormatter(&logrus.JSONFormatter{DisableTimestamp: !*logTimestamp})
+		formatter = &logrus.JSONFormatter{DisableTimestamp: !*logTimestamp}
 	default:
 		fmt.Fprintf(os.Stderr, "invalid log-format %q (expected text or json)\n", *logFormat)
 		os.Exit(2)
 	}
+	logger.SetFormatter(formatter)
 
 	store, err := storage.Open(*dbPath)
 	if err != nil {
@@ -71,6 +75,27 @@ func main() {
 		"max_message": *maxMessage,
 		"version":     *serverVersion,
 	}).Info("starting minipulsar")
+
+	if *enableTUI {
+		logCh := make(chan string, 500)
+		logger.SetOutput(tui.NewLogWriter(func(line string) {
+			select {
+			case logCh <- line:
+			default:
+			}
+		}))
+
+		program := tui.NewProgram(b, logCh)
+		go func() {
+			if err := b.Serve(*addr); err != nil {
+				logger.WithError(err).Fatal("listen")
+			}
+		}()
+		if err := program.Start(); err != nil {
+			logger.WithError(err).Fatal("tui")
+		}
+		return
+	}
 
 	if err := b.Serve(*addr); err != nil {
 		logger.WithError(err).Fatal("listen")
