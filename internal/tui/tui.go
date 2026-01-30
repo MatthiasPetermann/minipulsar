@@ -135,7 +135,7 @@ func (m *model) resize() {
 	}
 	m.padding = outerPadding
 
-	headerHeight := 5
+	headerHeight := 3
 	helpHeight := 1
 	verticalPadding := outerPadding * 2
 	availableHeight := m.height - headerHeight - helpHeight - verticalPadding
@@ -188,7 +188,7 @@ func (m model) View() string {
 	headerTop := styles.headerLine.Render(strings.Repeat("─", m.layout.totalWidth))
 	headerText := styles.headerText.Width(m.layout.totalWidth).Render("minipulsar :: synthwave monitor")
 	headerBottom := styles.headerLine.Render(strings.Repeat("─", m.layout.totalWidth))
-	header := styles.headerBox.Width(m.layout.totalWidth).Height(m.layout.headerHeight).Render(lipgloss.JoinVertical(lipgloss.Center, headerTop, headerText, headerBottom))
+	header := styles.headerBox.Width(m.layout.totalWidth).Render(lipgloss.JoinVertical(lipgloss.Center, headerTop, headerText, headerBottom))
 	stats := styles.box.Width(m.layout.statsWidth).Height(m.layout.topHeight).Render(renderOverview(m.stats, m.err))
 	topics := styles.box.Width(m.layout.topicsWidth).Height(m.layout.topHeight).Render(renderTopTopics(m.stats, m.layout.topicsWidth-2))
 	row := lipgloss.JoinHorizontal(lipgloss.Top, stats, " ", topics)
@@ -236,8 +236,7 @@ func newStyles() styleSet {
 
 	return styleSet{
 		headerBox: lipgloss.NewStyle().
-			Background(bg).
-			Padding(0, 1),
+			Background(bg),
 		headerLine: lipgloss.NewStyle().
 			Foreground(pink),
 		headerText: lipgloss.NewStyle().
