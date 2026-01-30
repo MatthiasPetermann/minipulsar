@@ -159,10 +159,10 @@ func (m *model) resize() {
 	if statsWidth > usableWidth-30 {
 		statsWidth = usableWidth - 30
 	}
-	topicsWidth := usableWidth - statsWidth - 2
+	topicsWidth := usableWidth - statsWidth - 3
 	if topicsWidth < 30 {
 		topicsWidth = 30
-		statsWidth = usableWidth - topicsWidth - 2
+		statsWidth = usableWidth - topicsWidth - 3
 	}
 
 	m.viewport = viewport.New(usableWidth-2, logHeight-2)
