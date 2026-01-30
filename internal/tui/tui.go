@@ -128,10 +128,10 @@ func (m *model) resize() {
 	m.ready = true
 
 	outerPadding := 1
-	usableWidth := m.width - outerPadding*2
+	usableWidth := m.width - outerPadding*2 - 1
 	if usableWidth < 40 {
 		outerPadding = 0
-		usableWidth = m.width
+		usableWidth = m.width - 1
 	}
 	m.padding = outerPadding
 
@@ -166,7 +166,6 @@ func (m *model) resize() {
 	}
 
 	m.viewport = viewport.New(usableWidth-2, logHeight-2)
-	m.viewport.Wrap = true
 	m.viewport.SetContent(strings.Join(m.logs, "\n"))
 	m.viewport.GotoBottom()
 	m.layout = layout{
