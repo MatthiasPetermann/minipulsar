@@ -135,7 +135,7 @@ func (m *model) resize() {
 	}
 	m.padding = outerPadding
 
-	headerHeight := 3
+	headerHeight := 5
 	helpHeight := 1
 	verticalPadding := outerPadding * 2
 	availableHeight := m.height - headerHeight - helpHeight - verticalPadding
@@ -187,13 +187,14 @@ func (m model) View() string {
 	headerTop := styles.headerLine.Render(strings.Repeat("─", m.layout.totalWidth))
 	headerText := styles.headerText.Width(m.layout.totalWidth).Render("minipulsar :: synthwave monitor")
 	headerBottom := styles.headerLine.Render(strings.Repeat("─", m.layout.totalWidth))
+	header := styles.headerBox.Width(m.layout.totalWidth).Height(headerHeight).Render(lipgloss.JoinVertical(lipgloss.Center, headerTop, headerText, headerBottom))
 	stats := styles.box.Width(m.layout.statsWidth).Height(m.layout.topHeight).Render(renderOverview(m.stats, m.err))
 	topics := styles.box.Width(m.layout.topicsWidth).Height(m.layout.topHeight).Render(renderTopTopics(m.stats, m.layout.topicsWidth-2))
 	row := lipgloss.JoinHorizontal(lipgloss.Top, stats, " ", topics)
 	logs := styles.box.Width(m.layout.totalWidth).Height(m.layout.logHeight).Render(m.viewport.View())
 	help := styles.help.Render("q: quit • ↑/↓/pgup/pgdown scroll logs")
 
-	content := lipgloss.JoinVertical(lipgloss.Left, headerTop, headerText, headerBottom, row, logs, help)
+	content := lipgloss.JoinVertical(lipgloss.Left, header, row, logs, help)
 	return lipgloss.NewStyle().Padding(m.padding, m.padding).Render(content)
 }
 
@@ -206,6 +207,7 @@ type layout struct {
 }
 
 type styleSet struct {
+	headerBox  lipgloss.Style
 	headerLine lipgloss.Style
 	headerText lipgloss.Style
 	box        lipgloss.Style
@@ -231,6 +233,9 @@ func newStyles() styleSet {
 		Padding(0, 1)
 
 	return styleSet{
+		headerBox: lipgloss.NewStyle().
+			Background(bg).
+			Padding(0, 1),
 		headerLine: lipgloss.NewStyle().
 			Foreground(pink),
 		headerText: lipgloss.NewStyle().
