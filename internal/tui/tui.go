@@ -130,8 +130,8 @@ func (m *model) resize() {
 	outerPadding := 1
 	usableWidth := m.width - outerPadding*2 - 2
 	if usableWidth < 40 {
-		outerPadding = 0
-		usableWidth = m.width - 2
+		outerPadding = 1
+		usableWidth = m.width - outerPadding*2 - 2
 	}
 	m.padding = outerPadding
 
