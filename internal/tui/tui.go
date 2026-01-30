@@ -166,6 +166,7 @@ func (m *model) resize() {
 	}
 
 	m.viewport = viewport.New(usableWidth-2, logHeight-2)
+	m.viewport.Wrap = true
 	m.viewport.SetContent(strings.Join(m.logs, "\n"))
 	m.viewport.GotoBottom()
 	m.layout = layout{
