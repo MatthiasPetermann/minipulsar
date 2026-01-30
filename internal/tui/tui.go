@@ -184,14 +184,16 @@ func (m model) View() string {
 
 	styles := newStyles()
 
-	header := styles.header.Width(m.layout.totalWidth).Render("minipulsar :: synthwave monitor")
+	headerTop := styles.headerLine.Render(strings.Repeat("─", m.layout.totalWidth))
+	headerText := styles.headerText.Width(m.layout.totalWidth).Render("minipulsar :: synthwave monitor")
+	headerBottom := styles.headerLine.Render(strings.Repeat("─", m.layout.totalWidth))
 	stats := styles.box.Width(m.layout.statsWidth).Height(m.layout.topHeight).Render(renderOverview(m.stats, m.err))
 	topics := styles.box.Width(m.layout.topicsWidth).Height(m.layout.topHeight).Render(renderTopTopics(m.stats, m.layout.topicsWidth-2))
 	row := lipgloss.JoinHorizontal(lipgloss.Top, stats, " ", topics)
 	logs := styles.box.Width(m.layout.totalWidth).Height(m.layout.logHeight).Render(m.viewport.View())
 	help := styles.help.Render("q: quit • ↑/↓/pgup/pgdown scroll logs")
 
-	content := lipgloss.JoinVertical(lipgloss.Left, header, row, logs, help)
+	content := lipgloss.JoinVertical(lipgloss.Left, headerTop, headerText, headerBottom, row, logs, help)
 	return lipgloss.NewStyle().Padding(m.padding, m.padding).Render(content)
 }
 
@@ -204,13 +206,14 @@ type layout struct {
 }
 
 type styleSet struct {
-	header lipgloss.Style
-	box    lipgloss.Style
-	help   lipgloss.Style
-	accent lipgloss.Style
-	label  lipgloss.Style
-	value  lipgloss.Style
-	bar    lipgloss.Style
+	headerLine lipgloss.Style
+	headerText lipgloss.Style
+	box        lipgloss.Style
+	help       lipgloss.Style
+	accent     lipgloss.Style
+	label      lipgloss.Style
+	value      lipgloss.Style
+	bar        lipgloss.Style
 }
 
 func newStyles() styleSet {
@@ -228,14 +231,13 @@ func newStyles() styleSet {
 		Padding(0, 1)
 
 	return styleSet{
-		header: lipgloss.NewStyle().
+		headerLine: lipgloss.NewStyle().
+			Foreground(pink),
+		headerText: lipgloss.NewStyle().
 			Foreground(text).
 			Background(bg).
 			Bold(true).
-			Border(lipgloss.NormalBorder(), true, false, true, false).
-			BorderForeground(pink).
-			Align(lipgloss.Center).
-			Padding(0, 1),
+			Align(lipgloss.Center),
 		box:    box,
 		help:   lipgloss.NewStyle().Foreground(cyan).Padding(0, 1),
 		accent: lipgloss.NewStyle().Foreground(pink).Bold(true),
