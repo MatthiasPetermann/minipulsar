@@ -135,7 +135,7 @@ func (m *model) resize() {
 	}
 	m.padding = outerPadding
 
-	headerHeight := 4
+	headerHeight := 3
 	helpHeight := 1
 	verticalPadding := outerPadding * 2
 	availableHeight := m.height - headerHeight - helpHeight - verticalPadding
@@ -232,7 +232,7 @@ func newStyles() styleSet {
 			Foreground(text).
 			Background(bg).
 			Bold(true).
-			Border(lipgloss.RoundedBorder()).
+			Border(lipgloss.NormalBorder(), true, false, true, false).
 			BorderForeground(pink).
 			Align(lipgloss.Center).
 			Padding(0, 1),
