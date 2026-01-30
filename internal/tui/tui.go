@@ -34,10 +34,11 @@ type model struct {
 	broker *broker.Broker
 	logCh  <-chan string
 
-	width  int
-	height int
-	ready  bool
-	layout layout
+	width   int
+	height  int
+	ready   bool
+	layout  layout
+	padding int
 
 	stats broker.StatsSnapshot
 	err   error
@@ -132,6 +133,7 @@ func (m *model) resize() {
 		outerPadding = 0
 		usableWidth = m.width
 	}
+	m.padding = outerPadding
 
 	headerHeight := 4
 	helpHeight := 1
@@ -190,7 +192,7 @@ func (m model) View() string {
 	help := styles.help.Render("q: quit • ↑/↓/pgup/pgdown scroll logs")
 
 	content := lipgloss.JoinVertical(lipgloss.Left, header, row, logs, help)
-	return lipgloss.NewStyle().Padding(outerPadding, outerPadding).Render(content)
+	return lipgloss.NewStyle().Padding(m.padding, m.padding).Render(content)
 }
 
 type layout struct {
