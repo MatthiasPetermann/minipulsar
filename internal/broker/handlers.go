@@ -11,6 +11,7 @@ import (
 
 	"minipulsar/internal/protocol"
 	"minipulsar/internal/storage"
+	"minipulsar/internal/topic"
 	pulsar "minipulsar/pb"
 )
 
@@ -84,10 +85,14 @@ func (b *Broker) handleProducer(conn net.Conn, base *pulsar.BaseCommand) error {
 	if cmd == nil {
 		return fmt.Errorf("PRODUCER without payload")
 	}
-	topic := cmd.GetTopic()
+	topicName := cmd.GetTopic()
 	producerID := cmd.GetProducerId()
-	if topic == "" {
+	if topicName == "" {
 		return fmt.Errorf("producer without topic")
+	}
+	topicInfo, err := topic.Parse(topicName)
+	if err != nil {
+		return err
 	}
 	name := cmd.GetProducerName()
 	if name == "" {
@@ -98,15 +103,16 @@ func (b *Broker) handleProducer(conn net.Conn, base *pulsar.BaseCommand) error {
 
 	b.mu.Lock()
 	b.producers[key] = &producer{
-		id:    producerID,
-		topic: topic,
-		conn:  conn,
+		id:         producerID,
+		topic:      topicInfo.FullName,
+		persistent: topicInfo.Persistent,
+		conn:       conn,
 	}
 	b.mu.Unlock()
 
 	b.cfg.Logger.WithFields(map[string]interface{}{
 		"producer_id": producerID,
-		"topic":       topic,
+		"topic":       topicInfo.FullName,
 		"name":        name,
 	}).Info("PRODUCER")
 
@@ -127,22 +133,29 @@ func (b *Broker) handleSubscribe(conn net.Conn, base *pulsar.BaseCommand) error 
 	if cmd == nil {
 		return fmt.Errorf("SUBSCRIBE without payload")
 	}
-	topic := cmd.GetTopic()
+	topicName := cmd.GetTopic()
 	sub := cmd.GetSubscription()
 	consumerID := cmd.GetConsumerId()
-	if topic == "" || sub == "" {
+	if topicName == "" || sub == "" {
 		return fmt.Errorf("invalid subscribe: empty topic or subscription")
 	}
+	topicInfo, err := topic.Parse(topicName)
+	if err != nil {
+		return err
+	}
 
-	if err := b.store.EnsureSubscription(topic, sub); err != nil {
-		return fmt.Errorf("ensure subscription: %w", err)
+	if topicInfo.Persistent {
+		if err := b.store.EnsureSubscription(topicInfo.FullName, sub); err != nil {
+			return fmt.Errorf("ensure subscription: %w", err)
+		}
 	}
 
 	c := &consumer{
 		id:           consumerID,
 		uid:          b.nextUID(),
-		topic:        topic,
+		topic:        topicInfo.FullName,
 		subscription: sub,
+		persistent:   topicInfo.Persistent,
 		conn:         conn,
 	}
 
@@ -159,7 +172,7 @@ func (b *Broker) handleSubscribe(conn net.Conn, base *pulsar.BaseCommand) error 
 	b.mu.Unlock()
 
 	// Attach to subscription state.
-	s := b.getOrCreateSubState(topic, sub)
+	s := b.getOrCreateSubState(topicInfo.FullName, sub, topicInfo.Persistent)
 	s.mu.Lock()
 	s.consumers = append(s.consumers, c)
 	s.mu.Unlock()
@@ -167,7 +180,7 @@ func (b *Broker) handleSubscribe(conn net.Conn, base *pulsar.BaseCommand) error 
 	b.cfg.Logger.WithFields(map[string]interface{}{
 		"consumer_id":  consumerID,
 		"consumer_uid": c.uid,
-		"topic":        topic,
+		"topic":        topicInfo.FullName,
 		"subscription": sub,
 	}).Info("SUBSCRIBE")
 
@@ -247,11 +260,15 @@ func (b *Broker) handleSend(conn net.Conn, base *pulsar.BaseCommand, payloadSect
 		SequenceID:  meta.GetSequenceId(),
 		PublishTime: int64(meta.GetPublishTime()),
 	}
-	if err := b.store.InsertMessage(&msg); err != nil {
-		return fmt.Errorf("insert message: %w", err)
+	if p.persistent {
+		if err := b.store.InsertMessage(&msg); err != nil {
+			return fmt.Errorf("insert message: %w", err)
+		}
+		b.kickTopic(p.topic)
+	} else {
+		msg.ID = b.nextNonPersistentID(p.topic)
+		b.deliverNonPersistent(p.topic, msg)
 	}
-
-	b.kickTopic(p.topic)
 
 	b.cfg.Logger.WithFields(map[string]interface{}{
 		"topic":       p.topic,
@@ -301,8 +318,10 @@ func (b *Broker) handleFlow(conn net.Conn, base *pulsar.BaseCommand) error {
 	c.mu.Unlock()
 
 	// Start / wake subscription delivery.
-	s := b.getOrCreateSubState(c.topic, c.subscription)
-	b.maybeStartSubDelivery(s)
+	if c.persistent {
+		s := b.getOrCreateSubState(c.topic, c.subscription, true)
+		b.maybeStartSubDelivery(s)
+	}
 	return nil
 }
 
@@ -327,6 +346,10 @@ func (b *Broker) handleAck(conn net.Conn, base *pulsar.BaseCommand) error {
 
 	topic := c.topic
 	sub := c.subscription
+
+	if !c.persistent {
+		return nil
+	}
 
 	ids := cmd.GetMessageId()
 	if len(ids) == 0 {
@@ -363,7 +386,7 @@ func (b *Broker) handleAck(conn net.Conn, base *pulsar.BaseCommand) error {
 	}
 
 	// Try delivering more if permits allow.
-	s := b.getOrCreateSubState(topic, sub)
+	s := b.getOrCreateSubState(topic, sub, true)
 	b.maybeStartSubDelivery(s)
 	return nil
 }
