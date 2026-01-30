@@ -8,7 +8,7 @@ generate:
 
 build:
 	mkdir -p bin
-	go build -o bin/minipulsar
+	go build -o bin/minipulsar ./cmd/minipulsar
 
 test:
 	go test ./...
