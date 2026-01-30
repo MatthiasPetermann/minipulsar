@@ -10,6 +10,26 @@ it can serve as a compact reference implementation. It intentionally omits many
 Pulsar features while still letting standard clients connect and exchange
 messages.
 
+## Goals and deliberate constraints
+
+### Goals
+
+- Learn and experiment with the Pulsar protocol.
+- Explore use cases where a complex Pulsar cluster is unnecessary, but the
+  protocol itself is still useful.
+- Build a highly portable standalone broker for those use cases (yes, it already
+  runs on NetBSD) with as few external dependencies as is reasonable.
+- Support JWT-based authentication.
+- Support Pulsar Functions in Lua.
+- Support policies expressed as Lua DSLs.
+
+### Non-goals
+
+- Restrict to a byte schema, meaning no broker-side schema validation.
+- At least for now, no highly available persistence model in the broker and no
+  multidimensional scaling like Apache Pulsar (if you need that, Apache Pulsar is
+  honestly the better choice).
+
 ## Features (intentionally reduced)
 
 - Pulsar binary protocol over TCP (default `:6650`)
