@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"time"
 
 	"google.golang.org/protobuf/proto"
 
+	"minipulsar/internal/messaging"
 	"minipulsar/internal/protocol"
 	"minipulsar/internal/storage"
 	"minipulsar/internal/topic"
@@ -21,6 +23,15 @@ func (b *Broker) handleConnect(conn net.Conn, base *pulsar.BaseCommand) error {
 	cmd := base.GetConnect()
 	if cmd == nil {
 		return fmt.Errorf("CONNECT without payload")
+	}
+	if b.cfg.Messaging != nil && b.cfg.Messaging.Security != nil {
+		roles, err := rolesFromConnect(cmd)
+		if err != nil {
+			return fmt.Errorf("parse auth roles: %w", err)
+		}
+		b.mu.Lock()
+		b.connRoles[conn] = roles
+		b.mu.Unlock()
 	}
 	b.cfg.Logger.WithFields(map[string]interface{}{
 		"client_version":   cmd.GetClientVersion(),
@@ -94,6 +105,9 @@ func (b *Broker) handleProducer(conn net.Conn, base *pulsar.BaseCommand) error {
 	if err != nil {
 		return err
 	}
+	if err := b.authorize(conn, topicInfo, messaging.ActionProduce); err != nil {
+		return err
+	}
 	name := cmd.GetProducerName()
 	if name == "" {
 		name = fmt.Sprintf("minipulsar-producer-%d", producerID)
@@ -141,6 +155,9 @@ func (b *Broker) handleSubscribe(conn net.Conn, base *pulsar.BaseCommand) error 
 	}
 	topicInfo, err := topic.Parse(topicName)
 	if err != nil {
+		return err
+	}
+	if err := b.authorize(conn, topicInfo, messaging.ActionConsume); err != nil {
 		return err
 	}
 
@@ -277,6 +294,10 @@ func (b *Broker) handleSend(conn net.Conn, base *pulsar.BaseCommand, payloadSect
 		"size":        len(payload),
 	}).Info("SEND")
 
+	if err := b.applyBindings(p.topic, payload); err != nil {
+		b.cfg.Logger.WithError(err).WithField("topic", p.topic).Warn("binding processing failed")
+	}
+
 	resp := &pulsar.BaseCommand{
 		Type: pulsar.BaseCommand_SEND_RECEIPT.Enum(),
 		SendReceipt: &pulsar.CommandSendReceipt{
@@ -289,6 +310,47 @@ func (b *Broker) handleSend(conn net.Conn, base *pulsar.BaseCommand, payloadSect
 		},
 	}
 	return b.writeCommand(conn, resp)
+}
+
+func (b *Broker) applyBindings(sourceTopic string, payload []byte) error {
+	if b.cfg.Messaging == nil || b.cfg.Messaging.Pool == nil {
+		return nil
+	}
+	bindings := b.cfg.Messaging.BindingsFor(sourceTopic)
+	if len(bindings) == 0 {
+		return nil
+	}
+	for _, binding := range bindings {
+		ctx := messaging.FunctionContext{
+			FunctionID:  binding.FunctionID,
+			SourceTopic: binding.SourceTopic,
+			TargetTopic: binding.TargetTopic,
+		}
+		output, err := b.cfg.Messaging.Pool.Execute(binding.FunctionID, payload, ctx)
+		if err != nil {
+			return err
+		}
+		targetInfo, err := topic.Parse(binding.TargetTopic)
+		if err != nil {
+			return fmt.Errorf("binding target invalid: %w", err)
+		}
+		msg := storage.Message{
+			Topic:       targetInfo.FullName,
+			Payload:     output,
+			SequenceID:  0,
+			PublishTime: time.Now().UnixMilli(),
+		}
+		if targetInfo.Persistent {
+			if err := b.store.InsertMessage(&msg); err != nil {
+				return err
+			}
+			b.kickTopic(targetInfo.FullName)
+		} else {
+			msg.ID = b.nextNonPersistentID(targetInfo.FullName)
+			b.deliverNonPersistent(targetInfo.FullName, msg)
+		}
+	}
+	return nil
 }
 
 // handleFlow applies additional permits to a consumer, enabling delivery.
