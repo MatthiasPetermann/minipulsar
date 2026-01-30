@@ -169,11 +169,12 @@ func (m *model) resize() {
 	m.viewport.SetContent(strings.Join(m.logs, "\n"))
 	m.viewport.GotoBottom()
 	m.layout = layout{
-		topHeight:   topHeight,
-		logHeight:   logHeight,
-		statsWidth:  statsWidth,
-		topicsWidth: topicsWidth,
-		totalWidth:  usableWidth,
+		topHeight:    topHeight,
+		logHeight:    logHeight,
+		statsWidth:   statsWidth,
+		topicsWidth:  topicsWidth,
+		totalWidth:   usableWidth,
+		headerHeight: headerHeight,
 	}
 }
 
@@ -187,7 +188,7 @@ func (m model) View() string {
 	headerTop := styles.headerLine.Render(strings.Repeat("─", m.layout.totalWidth))
 	headerText := styles.headerText.Width(m.layout.totalWidth).Render("minipulsar :: synthwave monitor")
 	headerBottom := styles.headerLine.Render(strings.Repeat("─", m.layout.totalWidth))
-	header := styles.headerBox.Width(m.layout.totalWidth).Height(headerHeight).Render(lipgloss.JoinVertical(lipgloss.Center, headerTop, headerText, headerBottom))
+	header := styles.headerBox.Width(m.layout.totalWidth).Height(m.layout.headerHeight).Render(lipgloss.JoinVertical(lipgloss.Center, headerTop, headerText, headerBottom))
 	stats := styles.box.Width(m.layout.statsWidth).Height(m.layout.topHeight).Render(renderOverview(m.stats, m.err))
 	topics := styles.box.Width(m.layout.topicsWidth).Height(m.layout.topHeight).Render(renderTopTopics(m.stats, m.layout.topicsWidth-2))
 	row := lipgloss.JoinHorizontal(lipgloss.Top, stats, " ", topics)
@@ -199,11 +200,12 @@ func (m model) View() string {
 }
 
 type layout struct {
-	topHeight   int
-	logHeight   int
-	statsWidth  int
-	topicsWidth int
-	totalWidth  int
+	topHeight    int
+	logHeight    int
+	statsWidth   int
+	topicsWidth  int
+	totalWidth   int
+	headerHeight int
 }
 
 type styleSet struct {
