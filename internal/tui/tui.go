@@ -185,10 +185,22 @@ func (m model) View() string {
 
 	styles := newStyles()
 
-	headerTop := styles.headerLine.Render(strings.Repeat("─", m.layout.totalWidth))
-	headerText := styles.headerText.Width(m.layout.totalWidth).Render("minipulsar :: synthwave monitor")
-	headerBottom := styles.headerLine.Render(strings.Repeat("─", m.layout.totalWidth))
-	header := styles.headerBox.Width(m.layout.totalWidth).Render(lipgloss.JoinVertical(lipgloss.Center, headerTop, headerText, headerBottom))
+	innerWidth := m.layout.totalWidth - 2
+	if innerWidth < 0 {
+		innerWidth = 0
+	}
+	innerHeight := m.layout.headerHeight - 2
+	if innerHeight < 0 {
+		innerHeight = 0
+	}
+	headerContent := lipgloss.Place(
+		innerWidth,
+		innerHeight,
+		lipgloss.Center,
+		lipgloss.Center,
+		styles.headerText.Render("minipulsar :: synthwave monitor"),
+	)
+	header := styles.headerBox.Width(m.layout.totalWidth).Height(m.layout.headerHeight).Render(headerContent)
 	stats := styles.box.Width(m.layout.statsWidth).Height(m.layout.topHeight).Render(renderOverview(m.stats, m.err))
 	topics := styles.box.Width(m.layout.topicsWidth).Height(m.layout.topHeight).Render(renderTopTopics(m.stats, m.layout.topicsWidth-2))
 	row := lipgloss.JoinHorizontal(lipgloss.Top, stats, " ", topics)
@@ -210,7 +222,6 @@ type layout struct {
 
 type styleSet struct {
 	headerBox  lipgloss.Style
-	headerLine lipgloss.Style
 	headerText lipgloss.Style
 	box        lipgloss.Style
 	help       lipgloss.Style
@@ -236,9 +247,9 @@ func newStyles() styleSet {
 
 	return styleSet{
 		headerBox: lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(pink).
 			Background(bg),
-		headerLine: lipgloss.NewStyle().
-			Foreground(pink),
 		headerText: lipgloss.NewStyle().
 			Foreground(text).
 			Background(bg).
