@@ -53,6 +53,9 @@ type Broker struct {
 	// subscription states keyed by (topic, subscription).
 	subs map[subKey]*subState
 
+	// nonPersistentSeq tracks message ids for non-persistent topics.
+	nonPersistentSeq map[string]uint64
+
 	mu sync.RWMutex
 
 	// connWrite serializes writes per connection to avoid interleaved frames.
@@ -65,9 +68,10 @@ type Broker struct {
 // producer represents a logical producer created by a client connection.
 // Producers are scoped to the connection that created them.
 type producer struct {
-	id    uint64
-	topic string
-	conn  net.Conn
+	id         uint64
+	topic      string
+	persistent bool
+	conn       net.Conn
 }
 
 // consumer represents a Pulsar consumer that receives messages for a subscription.
@@ -77,6 +81,7 @@ type consumer struct {
 	uid          int64  // server unique id (global)
 	topic        string
 	subscription string
+	persistent   bool
 	conn         net.Conn
 
 	mu      sync.Mutex
@@ -93,6 +98,7 @@ type subKey struct {
 type subState struct {
 	key subKey
 
+	persistent bool
 	mu         sync.Mutex
 	consumers  []*consumer
 	rr         int
@@ -120,11 +126,12 @@ func New(store *storage.Store, cfg Config) *Broker {
 	cfg.Logger = logger
 
 	return &Broker{
-		store:     store,
-		cfg:       cfg,
-		producers: make(map[producerKey]*producer),
-		consumers: make(map[consumerKey]*consumer),
-		subs:      make(map[subKey]*subState),
+		store:            store,
+		cfg:              cfg,
+		producers:        make(map[producerKey]*producer),
+		consumers:        make(map[consumerKey]*consumer),
+		subs:             make(map[subKey]*subState),
+		nonPersistentSeq: make(map[string]uint64),
 	}
 }
 

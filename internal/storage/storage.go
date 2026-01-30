@@ -2,7 +2,10 @@ package storage
 
 import (
 	"database/sql"
+	"fmt"
 	"time"
+
+	"minipulsar/internal/topic"
 )
 
 // Message represents a persisted Pulsar message in the broker storage layer.
@@ -44,46 +47,66 @@ func (s *Store) InitSchema() error {
 	schema := `
 PRAGMA journal_mode=WAL;
 
+CREATE TABLE IF NOT EXISTS namespaces (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant TEXT NOT NULL,
+  name TEXT NOT NULL,
+  UNIQUE (tenant, name)
+);
+
+CREATE TABLE IF NOT EXISTS topics (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  namespace_id INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  full_name TEXT NOT NULL UNIQUE,
+  FOREIGN KEY (namespace_id) REFERENCES namespaces(id)
+);
+
 CREATE TABLE IF NOT EXISTS messages (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  topic TEXT NOT NULL,
+  topic_id INTEGER NOT NULL,
   payload BLOB NOT NULL,
   publish_time INTEGER NOT NULL,
-  sequence_id INTEGER NOT NULL
+  sequence_id INTEGER NOT NULL,
+  FOREIGN KEY (topic_id) REFERENCES topics(id)
 );
 
 CREATE TABLE IF NOT EXISTS subscriptions (
-  topic TEXT NOT NULL,
+  topic_id INTEGER NOT NULL,
   name  TEXT NOT NULL,
   type  TEXT NOT NULL DEFAULT 'shared',
-  PRIMARY KEY (topic, name)
+  PRIMARY KEY (topic_id, name),
+  FOREIGN KEY (topic_id) REFERENCES topics(id)
 );
 
 -- Dispatch cursor: next message id to CLAIM/DISPATCH.
 -- IMPORTANT: This is NOT derived from ack; it moves only when claiming.
 CREATE TABLE IF NOT EXISTS subscription_cursor (
-  topic TEXT NOT NULL,
+  topic_id INTEGER NOT NULL,
   name  TEXT NOT NULL,
   next_message_id INTEGER NOT NULL,
-  PRIMARY KEY (topic, name),
-  FOREIGN KEY (topic, name) REFERENCES subscriptions(topic, name)
+  PRIMARY KEY (topic_id, name),
+  FOREIGN KEY (topic_id, name) REFERENCES subscriptions(topic_id, name)
 );
 
 -- Pending set: messages claimed (delivered) but not yet acked.
 CREATE TABLE IF NOT EXISTS subscription_pending (
-  topic TEXT NOT NULL,
+  topic_id INTEGER NOT NULL,
   name  TEXT NOT NULL,
   message_id INTEGER NOT NULL,
   consumer_id INTEGER NOT NULL,
   delivered_at INTEGER NOT NULL,
-  PRIMARY KEY (topic, name, message_id)
+  PRIMARY KEY (topic_id, name, message_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_pending_by_sub
-  ON subscription_pending(topic, name, message_id);
+  ON subscription_pending(topic_id, name, message_id);
 
 CREATE INDEX IF NOT EXISTS idx_messages_by_topic
-  ON messages(topic, id);
+  ON messages(topic_id, id);
+
+CREATE INDEX IF NOT EXISTS idx_topics_by_namespace
+  ON topics(namespace_id, name);
 `
 	_, err := s.db.Exec(schema)
 	return err
@@ -91,23 +114,36 @@ CREATE INDEX IF NOT EXISTS idx_messages_by_topic
 
 // EnsureSubscription ensures the subscription exists and has an initialized cursor.
 // This matches Pulsar's semantics where subscriptions are created on demand.
-func (s *Store) EnsureSubscription(topic, name string) error {
+func (s *Store) EnsureSubscription(topicName, name string) error {
+	info, err := topic.Parse(topicName)
+	if err != nil {
+		return err
+	}
+	if !info.Persistent {
+		return fmt.Errorf("non-persistent topic cannot be stored: %s", topicName)
+	}
+
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	topicID, err := ensureTopic(tx, info)
+	if err != nil {
+		return err
+	}
+
 	if _, err := tx.Exec(
-		"INSERT OR IGNORE INTO subscriptions(topic, name, type) VALUES(?, ?, 'shared')",
-		topic, name,
+		"INSERT OR IGNORE INTO subscriptions(topic_id, name, type) VALUES(?, ?, 'shared')",
+		topicID, name,
 	); err != nil {
 		return err
 	}
 
 	if _, err := tx.Exec(
-		"INSERT OR IGNORE INTO subscription_cursor(topic, name, next_message_id) VALUES(?, ?, 1)",
-		topic, name,
+		"INSERT OR IGNORE INTO subscription_cursor(topic_id, name, next_message_id) VALUES(?, ?, 1)",
+		topicID, name,
 	); err != nil {
 		return err
 	}
@@ -118,12 +154,31 @@ func (s *Store) EnsureSubscription(topic, name string) error {
 // InsertMessage persists a message for a topic and sets the generated ID.
 // The broker uses the ID as the Pulsar entry ID when sending messages.
 func (s *Store) InsertMessage(msg *Message) error {
+	info, err := topic.Parse(msg.Topic)
+	if err != nil {
+		return err
+	}
+	if !info.Persistent {
+		return fmt.Errorf("non-persistent topic cannot be stored: %s", msg.Topic)
+	}
+
 	if msg.PublishTime == 0 {
 		msg.PublishTime = time.Now().UnixMilli()
 	}
-	res, err := s.db.Exec(
-		"INSERT INTO messages(topic, payload, publish_time, sequence_id) VALUES(?, ?, ?, ?)",
-		msg.Topic, msg.Payload, msg.PublishTime, msg.SequenceID,
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	topicID, err := ensureTopic(tx, info)
+	if err != nil {
+		return err
+	}
+
+	res, err := tx.Exec(
+		"INSERT INTO messages(topic_id, payload, publish_time, sequence_id) VALUES(?, ?, ?, ?)",
+		topicID, msg.Payload, msg.PublishTime, msg.SequenceID,
 	)
 	if err != nil {
 		return err
@@ -133,12 +188,20 @@ func (s *Store) InsertMessage(msg *Message) error {
 		return err
 	}
 	msg.ID = id
-	return nil
+	return tx.Commit()
 }
 
 // AckIndividual clears pending entries for the given consumer and message IDs.
 // It models Pulsar's individual acknowledgment behavior for shared subscriptions.
-func (s *Store) AckIndividual(topic, sub string, consumerUID int64, ids []int64) error {
+func (s *Store) AckIndividual(topicName, sub string, consumerUID int64, ids []int64) error {
+	topicID, err := s.lookupTopicID(topicName)
+	if err != nil {
+		return err
+	}
+	if topicID == 0 {
+		return nil
+	}
+
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -147,8 +210,8 @@ func (s *Store) AckIndividual(topic, sub string, consumerUID int64, ids []int64)
 
 	for _, msgID := range ids {
 		if _, err := tx.Exec(
-			"DELETE FROM subscription_pending WHERE topic=? AND name=? AND message_id=? AND consumer_id=?",
-			topic, sub, msgID, consumerUID,
+			"DELETE FROM subscription_pending WHERE topic_id=? AND name=? AND message_id=? AND consumer_id=?",
+			topicID, sub, msgID, consumerUID,
 		); err != nil {
 			return err
 		}
@@ -159,10 +222,18 @@ func (s *Store) AckIndividual(topic, sub string, consumerUID int64, ids []int64)
 
 // DropPendingByConsumer removes all pending entries for a consumer.
 // This is invoked when connections close so other consumers can progress.
-func (s *Store) DropPendingByConsumer(topic, sub string, consumerUID int64) error {
-	_, err := s.db.Exec(
-		"DELETE FROM subscription_pending WHERE topic=? AND name=? AND consumer_id=?",
-		topic, sub, consumerUID,
+func (s *Store) DropPendingByConsumer(topicName, sub string, consumerUID int64) error {
+	topicID, err := s.lookupTopicID(topicName)
+	if err != nil {
+		return err
+	}
+	if topicID == 0 {
+		return nil
+	}
+
+	_, err = s.db.Exec(
+		"DELETE FROM subscription_pending WHERE topic_id=? AND name=? AND consumer_id=?",
+		topicID, sub, consumerUID,
 	)
 	return err
 }
@@ -170,17 +241,30 @@ func (s *Store) DropPendingByConsumer(topic, sub string, consumerUID int64) erro
 // ClaimBatch atomically claims a batch of messages for delivery.
 // It advances the cursor and inserts pending rows so other consumers
 // do not see the same messages until they are acknowledged.
-func (s *Store) ClaimBatch(topic, sub string, consumerUID int64, limit int) ([]Message, error) {
+func (s *Store) ClaimBatch(topicName, sub string, consumerUID int64, limit int) ([]Message, error) {
+	info, err := topic.Parse(topicName)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Persistent {
+		return nil, fmt.Errorf("non-persistent topic cannot be stored: %s", topicName)
+	}
+
 	tx, err := s.db.Begin()
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	topicID, err := ensureTopic(tx, info)
+	if err != nil {
+		return nil, err
+	}
+
 	// Ensure cursor row exists.
 	if _, err := tx.Exec(
-		"INSERT OR IGNORE INTO subscription_cursor(topic, name, next_message_id) VALUES(?, ?, 1)",
-		topic, sub,
+		"INSERT OR IGNORE INTO subscription_cursor(topic_id, name, next_message_id) VALUES(?, ?, 1)",
+		topicID, sub,
 	); err != nil {
 		return nil, err
 	}
@@ -188,25 +272,26 @@ func (s *Store) ClaimBatch(topic, sub string, consumerUID int64, limit int) ([]M
 	// Read cursor.
 	var cur int64
 	if err := tx.QueryRow(
-		"SELECT next_message_id FROM subscription_cursor WHERE topic=? AND name=?",
-		topic, sub,
+		"SELECT next_message_id FROM subscription_cursor WHERE topic_id=? AND name=?",
+		topicID, sub,
 	).Scan(&cur); err != nil {
 		return nil, err
 	}
 
 	// Select deliverable messages (not already pending).
 	rows, err := tx.Query(
-		`SELECT m.id, m.topic, m.payload, m.publish_time, m.sequence_id
+		`SELECT m.id, t.full_name, m.payload, m.publish_time, m.sequence_id
 		 FROM messages m
-		 WHERE m.topic = ?
+		 JOIN topics t ON t.id = m.topic_id
+		 WHERE m.topic_id = ?
 		   AND m.id >= ?
 		   AND NOT EXISTS (
 			 SELECT 1 FROM subscription_pending p
-			 WHERE p.topic = ? AND p.name = ? AND p.message_id = m.id
+			 WHERE p.topic_id = ? AND p.name = ? AND p.message_id = m.id
 		   )
 		 ORDER BY m.id
 		 LIMIT ?`,
-		topic, cur, topic, sub, limit,
+		topicID, cur, topicID, sub, limit,
 	)
 	if err != nil {
 		return nil, err
@@ -225,8 +310,8 @@ func (s *Store) ClaimBatch(topic, sub string, consumerUID int64, limit int) ([]M
 
 		// Insert pending (guarantees no other consumer can claim it later).
 		if _, err := tx.Exec(
-			"INSERT OR IGNORE INTO subscription_pending(topic, name, message_id, consumer_id, delivered_at) VALUES(?,?,?,?,?)",
-			topic, sub, m.ID, consumerUID, now,
+			"INSERT OR IGNORE INTO subscription_pending(topic_id, name, message_id, consumer_id, delivered_at) VALUES(?,?,?,?,?)",
+			topicID, sub, m.ID, consumerUID, now,
 		); err != nil {
 			return nil, err
 		}
@@ -242,8 +327,8 @@ func (s *Store) ClaimBatch(topic, sub string, consumerUID int64, limit int) ([]M
 	// Advance cursor monotonically to lastID+1 (dispatch cursor).
 	if len(res) > 0 {
 		if _, err := tx.Exec(
-			"UPDATE subscription_cursor SET next_message_id=? WHERE topic=? AND name=?",
-			lastID+1, topic, sub,
+			"UPDATE subscription_cursor SET next_message_id=? WHERE topic_id=? AND name=?",
+			lastID+1, topicID, sub,
 		); err != nil {
 			return nil, err
 		}
@@ -253,4 +338,68 @@ func (s *Store) ClaimBatch(topic, sub string, consumerUID int64, limit int) ([]M
 		return nil, err
 	}
 	return res, nil
+}
+
+func (s *Store) lookupTopicID(topicName string) (int64, error) {
+	info, err := topic.Parse(topicName)
+	if err != nil {
+		return 0, err
+	}
+	if !info.Persistent {
+		return 0, nil
+	}
+
+	var id int64
+	err = s.db.QueryRow(
+		`SELECT t.id
+		 FROM topics t
+		 JOIN namespaces n ON n.id = t.namespace_id
+		 WHERE n.tenant = ? AND n.name = ? AND t.name = ?`,
+		info.Tenant, info.Namespace, info.Name,
+	).Scan(&id)
+	if err == sql.ErrNoRows {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	return id, nil
+}
+
+func ensureTopic(tx *sql.Tx, info topic.Info) (int64, error) {
+	if !info.Persistent {
+		return 0, fmt.Errorf("non-persistent topic cannot be stored: %s", info.FullName)
+	}
+
+	if _, err := tx.Exec(
+		"INSERT OR IGNORE INTO namespaces(tenant, name) VALUES(?, ?)",
+		info.Tenant, info.Namespace,
+	); err != nil {
+		return 0, err
+	}
+
+	var namespaceID int64
+	if err := tx.QueryRow(
+		"SELECT id FROM namespaces WHERE tenant=? AND name=?",
+		info.Tenant, info.Namespace,
+	).Scan(&namespaceID); err != nil {
+		return 0, err
+	}
+
+	if _, err := tx.Exec(
+		"INSERT OR IGNORE INTO topics(namespace_id, name, full_name) VALUES(?, ?, ?)",
+		namespaceID, info.Name, info.FullName,
+	); err != nil {
+		return 0, err
+	}
+
+	var topicID int64
+	if err := tx.QueryRow(
+		"SELECT id FROM topics WHERE namespace_id=? AND name=?",
+		namespaceID, info.Name,
+	).Scan(&topicID); err != nil {
+		return 0, err
+	}
+
+	return topicID, nil
 }

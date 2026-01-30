@@ -23,11 +23,7 @@ func (s *Store) StatsSnapshot(limit int) (StatsSnapshot, error) {
 
 	var topics int
 	if err := s.db.QueryRow(
-		`SELECT COUNT(*) FROM (
-			SELECT topic FROM messages
-			UNION
-			SELECT topic FROM subscriptions
-		)`,
+		`SELECT COUNT(*) FROM topics`,
 	).Scan(&topics); err != nil {
 		return StatsSnapshot{}, err
 	}
@@ -43,21 +39,17 @@ func (s *Store) StatsSnapshot(limit int) (StatsSnapshot, error) {
 	}
 
 	rows, err := s.db.Query(
-		`SELECT t.topic,
+		`SELECT t.full_name,
 			COALESCE(m.message_count, 0) AS message_count,
 			COALESCE(p.pending_count, 0) AS pending_count
-		 FROM (
-			SELECT topic FROM messages
-			UNION
-			SELECT topic FROM subscriptions
-		 ) t
+		 FROM topics t
 		 LEFT JOIN (
-			SELECT topic, COUNT(*) AS message_count FROM messages GROUP BY topic
-		 ) m ON m.topic = t.topic
+			SELECT topic_id, COUNT(*) AS message_count FROM messages GROUP BY topic_id
+		 ) m ON m.topic_id = t.id
 		 LEFT JOIN (
-			SELECT topic, COUNT(*) AS pending_count FROM subscription_pending GROUP BY topic
-		 ) p ON p.topic = t.topic
-		 ORDER BY pending_count DESC, message_count DESC, t.topic
+			SELECT topic_id, COUNT(*) AS pending_count FROM subscription_pending GROUP BY topic_id
+		 ) p ON p.topic_id = t.id
+		 ORDER BY pending_count DESC, message_count DESC, t.full_name
 		 LIMIT ?`,
 		limit,
 	)

@@ -1,7 +1,8 @@
 # minipulsar – Minimal Pulsar-Compatible Broker (PoC)
 
 A deliberately minimal Apache Pulsar-compatible broker implemented in Go. It is
-meant for local experiments, protocol inspection, and learning—not production.
+meant for local experiments, protocol inspection, and learning, and we are open
+to using it as a standalone component at the edge—not production.
 
 ## Why this exists
 
@@ -10,9 +11,31 @@ it can serve as a compact reference implementation. It intentionally omits many
 Pulsar features while still letting standard clients connect and exchange
 messages.
 
+## Goals and deliberate constraints
+
+### Goals
+
+- Learn and experiment with the Pulsar protocol.
+- Explore use cases where a complex Pulsar cluster is unnecessary, but the
+  protocol itself is still useful.
+- Build a highly portable standalone broker for those use cases (yes, it already
+  runs on NetBSD) with as few external dependencies as is reasonable.
+- Keep it viable as a standalone component for edge deployments.
+- Support JWT-based authentication.
+- Support Pulsar Functions in Lua.
+- Support policies expressed as Lua DSLs.
+
+### Non-goals
+
+- Restrict to a byte schema, meaning no broker-side schema validation.
+- At least for now, no highly available persistence model in the broker and no
+  multidimensional scaling like Apache Pulsar (if you need that, Apache Pulsar is
+  honestly the better choice).
+
 ## Features (intentionally reduced)
 
 - Pulsar binary protocol over TCP (default `:6650`)
+- Persistent and non-persistent topics (`persistent://` and `non-persistent://`)
 - Supported commands:
   - `CONNECT` / `CONNECTED`
   - `PARTITIONED_METADATA` / `PARTITIONED_METADATA_RESPONSE` (always 0 partitions)
@@ -24,9 +47,11 @@ messages.
   - `ACK` (individual ack only)
   - `PING` / `PONG`
 - Persistence:
-  - SQLite log per topic in `messages`
+  - SQLite log per topic in `messages` (persistent topics only)
+  - Normalized schema to reflect tenant → namespace → topic
   - Subscription cursor and pending delivery tables
   - Shared subscription delivery with round-robin consumers
+  - Non-persistent topics are kept in memory only (no backlog)
 
 ## Non-features
 

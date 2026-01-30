@@ -22,6 +22,10 @@ func (b *Broker) kickTopic(topic string) {
 // It checks for available permits before spawning a goroutine.
 func (b *Broker) maybeStartSubDelivery(s *subState) {
 	s.mu.Lock()
+	if !s.persistent {
+		s.mu.Unlock()
+		return
+	}
 	// already running?
 	if s.delivering {
 		s.mu.Unlock()

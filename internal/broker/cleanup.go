@@ -34,10 +34,23 @@ func (b *Broker) removeConsumer(key consumerKey) {
 	}
 
 	// Drop pending messages for this consumer UID (so others can progress).
-	_ = b.store.DropPendingByConsumer(c.topic, c.subscription, c.uid)
+	if c.persistent {
+		_ = b.store.DropPendingByConsumer(c.topic, c.subscription, c.uid)
+	}
 
 	// Trigger delivery again (might unblock others).
 	if s != nil {
-		b.maybeStartSubDelivery(s)
+		if c.persistent {
+			b.maybeStartSubDelivery(s)
+		} else {
+			s.mu.Lock()
+			hasConsumers := len(s.consumers) > 0
+			s.mu.Unlock()
+			if !hasConsumers {
+				b.mu.Lock()
+				delete(b.subs, skey)
+				b.mu.Unlock()
+			}
+		}
 	}
 }
