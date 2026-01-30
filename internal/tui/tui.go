@@ -131,7 +131,7 @@ func (m *model) resize() {
 		usableWidth = m.width
 	}
 
-	headerHeight := 3
+	headerHeight := 4
 	helpHeight := 1
 	padding := 2
 	availableHeight := m.height - headerHeight - helpHeight - padding
@@ -228,8 +228,9 @@ func newStyles() styleSet {
 			Foreground(text).
 			Background(bg).
 			Bold(true).
-			Border(lipgloss.NormalBorder(), true, false, true, false).
+			Border(lipgloss.RoundedBorder()).
 			BorderForeground(pink).
+			Align(lipgloss.Center).
 			Padding(0, 1),
 		box:    box,
 		help:   lipgloss.NewStyle().Foreground(cyan).Padding(0, 1),
