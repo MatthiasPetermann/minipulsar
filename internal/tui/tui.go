@@ -126,7 +126,7 @@ func (m *model) resize() {
 	}
 	m.ready = true
 
-	usableWidth := m.width - 1
+	usableWidth := m.width - 2
 	if usableWidth < 40 {
 		usableWidth = m.width
 	}
@@ -180,7 +180,7 @@ func (m model) View() string {
 
 	styles := newStyles()
 
-	header := styles.header.Render("minipulsar :: synthwave monitor")
+	header := styles.header.Width(m.layout.totalWidth).Render("minipulsar :: synthwave monitor")
 	stats := styles.box.Width(m.layout.statsWidth).Height(m.layout.topHeight).Render(renderOverview(m.stats, m.err))
 	topics := styles.box.Width(m.layout.topicsWidth).Height(m.layout.topHeight).Render(renderTopTopics(m.stats, m.layout.topicsWidth-2))
 	row := lipgloss.JoinHorizontal(lipgloss.Top, stats, " ", topics)
