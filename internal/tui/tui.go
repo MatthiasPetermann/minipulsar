@@ -126,6 +126,11 @@ func (m *model) resize() {
 	}
 	m.ready = true
 
+	usableWidth := m.width - 1
+	if usableWidth < 40 {
+		usableWidth = m.width
+	}
+
 	headerHeight := 3
 	helpHeight := 1
 	padding := 2
@@ -147,13 +152,16 @@ func (m *model) resize() {
 	if statsWidth < 28 {
 		statsWidth = 28
 	}
-	topicsWidth := m.width - statsWidth - 1
+	if statsWidth > usableWidth-30 {
+		statsWidth = usableWidth - 30
+	}
+	topicsWidth := usableWidth - statsWidth - 1
 	if topicsWidth < 30 {
 		topicsWidth = 30
-		statsWidth = m.width - topicsWidth - 1
+		statsWidth = usableWidth - topicsWidth - 1
 	}
 
-	m.viewport = viewport.New(m.width-2, logHeight-2)
+	m.viewport = viewport.New(usableWidth-2, logHeight-2)
 	m.viewport.SetContent(strings.Join(m.logs, "\n"))
 	m.viewport.GotoBottom()
 	m.layout = layout{
@@ -161,6 +169,7 @@ func (m *model) resize() {
 		logHeight:   logHeight,
 		statsWidth:  statsWidth,
 		topicsWidth: topicsWidth,
+		totalWidth:  usableWidth,
 	}
 }
 
@@ -175,7 +184,7 @@ func (m model) View() string {
 	stats := styles.box.Width(m.layout.statsWidth).Height(m.layout.topHeight).Render(renderOverview(m.stats, m.err))
 	topics := styles.box.Width(m.layout.topicsWidth).Height(m.layout.topHeight).Render(renderTopTopics(m.stats, m.layout.topicsWidth-2))
 	row := lipgloss.JoinHorizontal(lipgloss.Top, stats, " ", topics)
-	logs := styles.box.Width(m.width).Height(m.layout.logHeight).Render(m.viewport.View())
+	logs := styles.box.Width(m.layout.totalWidth).Height(m.layout.logHeight).Render(m.viewport.View())
 	help := styles.help.Render("q: quit • ↑/↓/pgup/pgdown scroll logs")
 
 	return lipgloss.JoinVertical(lipgloss.Left, header, row, logs, help)
@@ -186,6 +195,7 @@ type layout struct {
 	logHeight   int
 	statsWidth  int
 	topicsWidth int
+	totalWidth  int
 }
 
 type styleSet struct {
