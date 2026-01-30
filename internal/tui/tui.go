@@ -135,7 +135,7 @@ func (m *model) resize() {
 	}
 	m.padding = outerPadding
 
-	headerHeight := 3
+	headerHeight := 6
 	helpHeight := 1
 	verticalPadding := outerPadding * 2
 	availableHeight := m.height - headerHeight - helpHeight - verticalPadding
@@ -173,7 +173,7 @@ func (m *model) resize() {
 		logHeight:    logHeight,
 		statsWidth:   statsWidth,
 		topicsWidth:  topicsWidth,
-		totalWidth:   usableWidth,
+		totalWidth:   usableWidth+2,
 		headerHeight: headerHeight,
 	}
 }
@@ -191,13 +191,13 @@ func (m model) View() string {
 		1,
 		lipgloss.Center,
 		lipgloss.Center,
-		styles.headerText.Render("minipulsar :: synthwave monitor"),
+		styles.headerText.Render("Minipulsar"),
 	)
 	header := lipgloss.JoinVertical(lipgloss.Left, headerLine, headerText, headerLine)
 	stats := styles.box.Width(m.layout.statsWidth).Height(m.layout.topHeight).Render(renderOverview(m.stats, m.err))
 	topics := styles.box.Width(m.layout.topicsWidth).Height(m.layout.topHeight).Render(renderTopTopics(m.stats, m.layout.topicsWidth-2))
 	row := lipgloss.JoinHorizontal(lipgloss.Top, stats, " ", topics)
-	logs := styles.box.Width(m.layout.totalWidth).Height(m.layout.logHeight).Render(m.viewport.View())
+	logs := styles.box.Width(m.layout.totalWidth-2).Height(m.layout.logHeight).Render(m.viewport.View())
 	help := styles.help.Render("q: quit • ↑/↓/pgup/pgdown scroll logs")
 
 	content := lipgloss.JoinVertical(lipgloss.Left, header, row, logs, help)
