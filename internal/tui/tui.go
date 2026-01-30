@@ -126,7 +126,7 @@ func (m *model) resize() {
 	}
 	m.ready = true
 
-	usableWidth := m.width - 2
+	usableWidth := m.width - 4
 	if usableWidth < 40 {
 		usableWidth = m.width
 	}
@@ -187,7 +187,8 @@ func (m model) View() string {
 	logs := styles.box.Width(m.layout.totalWidth).Height(m.layout.logHeight).Render(m.viewport.View())
 	help := styles.help.Render("q: quit • ↑/↓/pgup/pgdown scroll logs")
 
-	return lipgloss.JoinVertical(lipgloss.Left, header, row, logs, help)
+	content := lipgloss.JoinVertical(lipgloss.Left, header, row, logs, help)
+	return lipgloss.NewStyle().Padding(0, 1).Render(content)
 }
 
 type layout struct {
@@ -227,7 +228,7 @@ func newStyles() styleSet {
 			Foreground(text).
 			Background(bg).
 			Bold(true).
-			Border(lipgloss.NormalBorder(), false, false, true, false).
+			Border(lipgloss.NormalBorder(), true, false, true, false).
 			BorderForeground(pink).
 			Padding(0, 1),
 		box:    box,
