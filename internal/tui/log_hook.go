@@ -2,43 +2,44 @@ package tui
 
 import (
 	"strings"
-
-	"github.com/sirupsen/logrus"
+	"sync"
 )
 
-// LogHook streams formatted log lines to a provided sink.
-type LogHook struct {
-	formatter logrus.Formatter
-	send      func(string)
+// LogWriter streams formatted log output into a provided sink.
+// It implements io.Writer so it can be used with the logrus SetOutput API.
+type LogWriter struct {
+	mu   sync.Mutex
+	buf  strings.Builder
+	send func(string)
 }
 
-// NewLogHook creates a LogHook with the given formatter and send callback.
-func NewLogHook(formatter logrus.Formatter, send func(string)) *LogHook {
-	return &LogHook{
-		formatter: formatter,
-		send:      send,
-	}
+// NewLogWriter creates a LogWriter with the given send callback.
+func NewLogWriter(send func(string)) *LogWriter {
+	return &LogWriter{send: send}
 }
 
-// Levels returns all log levels handled by the hook.
-func (h *LogHook) Levels() []logrus.Level {
-	return []logrus.Level{
-		logrus.TraceLevel,
-		logrus.DebugLevel,
-		logrus.InfoLevel,
-		logrus.WarnLevel,
-		logrus.ErrorLevel,
-		logrus.FatalLevel,
-	}
-}
+// Write buffers incoming bytes and forwards complete lines to the send callback.
+func (w *LogWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 
-// Fire formats the log entry and forwards it to the send callback.
-func (h *LogHook) Fire(entry *logrus.Entry) error {
-	line, err := h.formatter.Format(entry)
-	if err != nil {
-		return err
+	_, _ = w.buf.Write(p)
+	data := w.buf.String()
+
+	for {
+		idx := strings.IndexByte(data, '\n')
+		if idx == -1 {
+			break
+		}
+		line := strings.TrimRight(data[:idx], "\r")
+		w.send(line)
+		data = data[idx+1:]
 	}
-	text := strings.TrimRight(string(line), "\n")
-	h.send(text)
-	return nil
+
+	w.buf.Reset()
+	if len(data) > 0 {
+		w.buf.WriteString(data)
+	}
+
+	return len(p), nil
 }

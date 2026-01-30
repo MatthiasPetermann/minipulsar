@@ -3,7 +3,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	"io"
 	"os"
 	"strings"
 
@@ -79,8 +78,7 @@ func main() {
 
 	if *enableTUI {
 		logCh := make(chan string, 500)
-		logger.SetOutput(io.Discard)
-		logger.AddHook(tui.NewLogHook(formatter, func(line string) {
+		logger.SetOutput(tui.NewLogWriter(func(line string) {
 			select {
 			case logCh <- line:
 			default:
