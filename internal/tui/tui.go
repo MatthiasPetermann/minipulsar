@@ -126,15 +126,17 @@ func (m *model) resize() {
 	}
 	m.ready = true
 
-	usableWidth := m.width - 4
+	outerPadding := 1
+	usableWidth := m.width - outerPadding*2
 	if usableWidth < 40 {
+		outerPadding = 0
 		usableWidth = m.width
 	}
 
 	headerHeight := 4
 	helpHeight := 1
-	padding := 2
-	availableHeight := m.height - headerHeight - helpHeight - padding
+	verticalPadding := outerPadding * 2
+	availableHeight := m.height - headerHeight - helpHeight - verticalPadding
 	if availableHeight < 6 {
 		availableHeight = 6
 	}
@@ -188,7 +190,7 @@ func (m model) View() string {
 	help := styles.help.Render("q: quit • ↑/↓/pgup/pgdown scroll logs")
 
 	content := lipgloss.JoinVertical(lipgloss.Left, header, row, logs, help)
-	return lipgloss.NewStyle().Padding(0, 1).Render(content)
+	return lipgloss.NewStyle().Padding(outerPadding, outerPadding).Render(content)
 }
 
 type layout struct {
