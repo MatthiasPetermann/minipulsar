@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/viewport"
-	"github.com/charmbracelet/bubbletea"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
 	"minipulsar/internal/broker"
@@ -47,47 +47,47 @@ type model struct {
 }
 
 // NewProgram builds a Bubble Tea program that renders broker stats and logs.
-func NewProgram(b *broker.Broker, logCh <-chan string) *bubbletea.Program {
+func NewProgram(b *broker.Broker, logCh <-chan string) *tea.Program {
 	m := model{
 		broker: b,
 		logCh:  logCh,
 	}
-	return bubbletea.NewProgram(m, bubbletea.WithAltScreen())
+	return tea.NewProgram(m, tea.WithAltScreen())
 }
 
-func (m model) Init() bubbletea.Cmd {
-	return bubbletea.Batch(tick(), waitForLog(m.logCh))
+func (m model) Init() tea.Cmd {
+	return tea.Batch(tick(), waitForLog(m.logCh))
 }
 
-func tick() bubbletea.Cmd {
-	return bubbletea.Tick(time.Second, func(t time.Time) bubbletea.Msg {
+func tick() tea.Cmd {
+	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
 		return tickMsg(t)
 	})
 }
 
-func waitForLog(logCh <-chan string) bubbletea.Cmd {
-	return func() bubbletea.Msg {
+func waitForLog(logCh <-chan string) tea.Cmd {
+	return func() tea.Msg {
 		line, ok := <-logCh
 		return logMsg{line: line, ok: ok}
 	}
 }
 
-func fetchStats(b *broker.Broker) bubbletea.Cmd {
-	return func() bubbletea.Msg {
+func fetchStats(b *broker.Broker) tea.Cmd {
+	return func() tea.Msg {
 		stats, err := b.StatsSnapshot(defaultTopLimit)
 		return statsMsg{stats: stats, err: err}
 	}
 }
 
-func (m model) Update(msg bubbletea.Msg) (bubbletea.Model, bubbletea.Cmd) {
+func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case bubbletea.WindowSizeMsg:
+	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
 		m.resize()
 		return m, nil
 	case tickMsg:
-		return m, bubbletea.Batch(fetchStats(m.broker), tick())
+		return m, tea.Batch(fetchStats(m.broker), tick())
 	case statsMsg:
 		m.stats = msg.stats
 		m.err = msg.err
@@ -103,10 +103,10 @@ func (m model) Update(msg bubbletea.Msg) (bubbletea.Model, bubbletea.Cmd) {
 		m.viewport.SetContent(strings.Join(m.logs, "\n"))
 		m.viewport.GotoBottom()
 		return m, waitForLog(m.logCh)
-	case bubbletea.KeyMsg:
+	case tea.KeyMsg:
 		switch msg.String() {
 		case "q", "ctrl+c":
-			return m, bubbletea.Quit
+			return m, tea.Quit
 		case "up", "k":
 			m.viewport.LineUp(1)
 		case "down", "j":

@@ -22,7 +22,14 @@ func NewLogHook(formatter logrus.Formatter, send func(string)) *LogHook {
 
 // Levels returns all log levels handled by the hook.
 func (h *LogHook) Levels() []logrus.Level {
-	return logrus.AllLevels
+	return []logrus.Level{
+		logrus.TraceLevel,
+		logrus.DebugLevel,
+		logrus.InfoLevel,
+		logrus.WarnLevel,
+		logrus.ErrorLevel,
+		logrus.FatalLevel,
+	}
 }
 
 // Fire formats the log entry and forwards it to the send callback.
