@@ -23,7 +23,7 @@ const (
 
 // Config controls the Prometheus metrics server.
 type Config struct {
-	Logger         *logrus.Entry
+	Logger         logrus.FieldLogger
 	ListenAddr     string
 	Path           string
 	ScrapeInterval time.Duration
@@ -37,7 +37,7 @@ type Server struct {
 	server *http.Server
 	stopCh chan struct{}
 	wg     sync.WaitGroup
-	logger *logrus.Entry
+	logger logrus.FieldLogger
 
 	mu       sync.RWMutex
 	snapshot metricsSnapshot
@@ -71,7 +71,7 @@ func NewServer(b *broker.Broker, cfg Config) (*Server, error) {
 	}
 	logger := cfg.Logger
 	if logger == nil {
-		logger = logrus.New().WithField("component", "metrics")
+		logger = logrus.StandardLogger()
 	}
 
 	mux := http.NewServeMux()
