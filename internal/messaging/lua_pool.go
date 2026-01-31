@@ -1,6 +1,7 @@
 package messaging
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -131,13 +132,12 @@ func (w *luaWorker) execute(functionID string, payload []byte, ctx FunctionConte
 	ctxTable.RawSetString("target_topic", lua.LString(ctx.TargetTopic))
 
 	if fn.maxRuntime > 0 {
-		start := time.Now()
-		w.state.SetHook(func(_ *lua.LState, _ *lua.Debug) {
-			if time.Since(start) > fn.maxRuntime {
-				w.state.RaiseError("lua execution exceeded max runtime")
-			}
-		}, lua.MaskCount, 10000)
-		defer w.state.SetHook(nil, 0, 0)
+		runCtx, cancel := context.WithTimeout(context.Background(), fn.maxRuntime)
+		w.state.SetContext(runCtx)
+		defer func() {
+			cancel()
+			w.state.RemoveContext()
+		}()
 	}
 
 	if err := w.state.CallByParam(lua.P{
