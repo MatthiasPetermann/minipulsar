@@ -52,9 +52,3 @@ The optional TUI (`internal/tui`) uses Bubble Tea and Lip Gloss to render:
 The TUI is enabled with the `-tui` flag. Log lines are routed into the TUI using
 `LogWriter`, which implements `io.Writer` and streams complete log lines into a
 channel that the UI consumes.
-
-## Internal logrus shim
-
-The repository includes a minimal `internal/third_party/logrus` implementation
-that mirrors common logrus APIs. It is not currently wired into the runtime but
-is available for compatibility if needed.
