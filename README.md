@@ -38,6 +38,8 @@ We intentionally build **only what’s necessary**, so you can:
 - run a broker **easily in edge environments**,
 - add features **iteratively** without monolithic dependencies.
 
+Personal motivation: I originally wanted to run Apache Pulsar on NetBSD. While Pulsar is implemented in Java and should run anywhere a JDK exists, in practice native libs bundled in some JARs (e.g., BookKeeper → RocksDB) make non‑mainstream platforms fail. That friction was one of the reasons to dig deeper into the Pulsar stack.
+
 ---
 
 ## Goals (and deliberate constraints)
@@ -48,7 +50,7 @@ We intentionally build **only what’s necessary**, so you can:
 - A minimal broker for edge deployments.
 - Portable (already runs on NetBSD).
 - JWT-based authentication.
-- Policies as a Lua DSL.
+- Policies as a human-readable DSL (HCL); only functions are Lua.
 - Pulsar Functions (Lua) for edge transformations.
 
 ### Non-goals (for now)
@@ -268,3 +270,10 @@ For production environments, full Apache Pulsar is the right choice.
 
 If you want to help make the **Edge Broker** real:
 issues, feedback, and PRs are welcome.
+
+---
+
+## Author
+
+minipulsar is an experiment by Matthias Petermann. More background and write‑ups at: https://www.petermann-digital.de/blog/  
+If you need support beyond the open-source scope, feel free to reach out.
