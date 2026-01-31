@@ -6,7 +6,7 @@ import (
 )
 
 // LogWriter streams formatted log output into a provided sink.
-// It implements io.Writer so it can be used with the logrus SetOutput API.
+// It implements io.Writer so it can be used with slog handlers.
 type LogWriter struct {
 	mu   sync.Mutex
 	buf  strings.Builder

@@ -8,7 +8,6 @@ require (
 	github.com/charmbracelet/lipgloss v0.9.1
 	github.com/hashicorp/hcl/v2 v2.20.0
 	github.com/mattn/go-sqlite3 v1.14.22
-	github.com/sirupsen/logrus v0.0.0
 	github.com/yuin/gopher-lua v1.1.1
 	google.golang.org/protobuf v1.33.0
 )
@@ -38,5 +37,3 @@ require (
 	golang.org/x/text v0.11.0 // indirect
 	golang.org/x/tools v0.6.0 // indirect
 )
-
-replace github.com/sirupsen/logrus => ./internal/third_party/logrus

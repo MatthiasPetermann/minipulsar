@@ -9,6 +9,7 @@ namespace "persistent://public/default" {
 
 function "transform" {
   path = "transform.lua"
+  max_runtime = "250ms"
 }
 
 binding {

@@ -30,7 +30,7 @@ func (b *Broker) deliverNonPersistent(topic string, msg storage.Message) {
 		}
 
 		if err := b.writeMsgFrame(c.conn, c.id, msg); err != nil {
-			b.cfg.Logger.WithField("consumer_id", c.id).WithError(err).Warn("deliver write error")
+			b.cfg.Logger.Warn("deliver write error", "err", err, "consumer_id", c.id)
 			continue
 		}
 

@@ -1,6 +1,7 @@
 package broker
 
 import (
+	"crypto/tls"
 	"io"
 	"net"
 	"sync"
@@ -13,16 +14,22 @@ import (
 // Serve listens for TCP connections and starts a goroutine per connection.
 // It blocks forever until the listener fails.
 func (b *Broker) Serve(addr string) error {
-	ln, err := net.Listen("tcp", addr)
+	var ln net.Listener
+	var err error
+	if b.cfg.TLSConfig != nil {
+		ln, err = tls.Listen("tcp", addr, b.cfg.TLSConfig)
+	} else {
+		ln, err = net.Listen("tcp", addr)
+	}
 	if err != nil {
 		return err
 	}
-	b.cfg.Logger.WithField("addr", addr).Info("minipulsar listening")
+	b.cfg.Logger.Info("minipulsar listening", "addr", addr, "tls", b.cfg.TLSConfig != nil)
 
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
-			b.cfg.Logger.WithError(err).Warn("accept error")
+			b.cfg.Logger.Warn("accept error", "err", err)
 			continue
 		}
 		go b.handleConnection(conn)
@@ -40,15 +47,15 @@ func (b *Broker) handleConnection(conn net.Conn) {
 	}()
 
 	remote := conn.RemoteAddr().String()
-	b.cfg.Logger.WithField("remote", remote).Info("new connection")
+	b.cfg.Logger.Info("new connection", "remote", remote)
 
 	for {
 		if err := b.handleFrame(conn); err != nil {
-			entry := b.cfg.Logger.WithField("remote", remote)
+			entry := b.cfg.Logger.With("remote", remote)
 			if err == io.EOF {
 				entry.Info("connection closed")
 			} else {
-				entry.WithError(err).Warn("connection error")
+				entry.Warn("connection error", "err", err)
 			}
 			return
 		}

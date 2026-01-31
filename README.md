@@ -152,6 +152,59 @@ make build      # compile ./bin/minipulsar
 
 ---
 
+## TLS (recommended for non-local deployments)
+
+Minipulsar can listen with TLS by providing a certificate and private key.
+
+### Quick self-signed cert (local/dev)
+
+```bash
+openssl req -x509 -newkey rsa:2048 -nodes \
+  -keyout server.key -out server.crt \
+  -days 365 -subj "/CN=localhost"
+```
+
+Run the broker with TLS:
+
+```bash
+./bin/minipulsar \
+  -addr :6650 \
+  -db ./minipulsar.db \
+  -tls-cert ./server.crt \
+  -tls-key ./server.key
+```
+
+### mTLS (optional client certificate verification)
+
+Create a simple CA and sign a server cert:
+
+```bash
+openssl req -x509 -newkey rsa:2048 -nodes \
+  -keyout ca.key -out ca.crt \
+  -days 365 -subj "/CN=minipulsar-ca"
+
+openssl req -newkey rsa:2048 -nodes \
+  -keyout server.key -out server.csr \
+  -subj "/CN=localhost"
+
+openssl x509 -req -in server.csr \
+  -CA ca.crt -CAkey ca.key -CAcreateserial \
+  -out server.crt -days 365
+```
+
+Start the broker and require client certificates:
+
+```bash
+./bin/minipulsar \
+  -addr :6650 \
+  -db ./minipulsar.db \
+  -tls-cert ./server.crt \
+  -tls-key ./server.key \
+  -tls-client-ca ./ca.crt
+```
+
+---
+
 ## Quickstart (JWT auth + policies)
 
 ```bash
@@ -209,6 +262,7 @@ namespace "persistent://public/default" {
 
 function "transform" {
   path = "transform.lua"
+  max_runtime = "250ms"
 }
 
 binding {
@@ -217,6 +271,9 @@ binding {
   target = "persistent://public/default/temperature.c"
 }
 ```
+
+`max_runtime` is optional per function. When set, the Lua worker aborts execution
+that exceeds the duration (e.g. `250ms`, `2s`). Omitted or empty means unlimited.
 
 ### Security modes
 
@@ -246,6 +303,9 @@ binding {
 - `-metrics-top-topics` – number of top topics in metrics
 - `-jwt-secret` – HS256 secret (or set `MINIPULSAR_JWT_SECRET`)
 - `-tui` – enable synthwave TUI
+- `-tls-cert` – TLS server certificate PEM (enables TLS)
+- `-tls-key` – TLS server private key PEM
+- `-tls-client-ca` – optional client CA bundle (mTLS)
 
 ---
 

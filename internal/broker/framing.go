@@ -79,7 +79,7 @@ func (b *Broker) handleFrame(conn net.Conn) error {
 	case pulsar.BaseCommand_CLOSE_CONSUMER:
 		return b.handleCloseConsumer(conn, &base)
 	default:
-		b.cfg.Logger.WithField("type", base.GetType()).Warn("unhandled command type")
+		b.cfg.Logger.Warn("unhandled command type", "type", base.GetType())
 		return nil
 	}
 }
