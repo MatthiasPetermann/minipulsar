@@ -46,6 +46,9 @@ func rolesFromConnect(cmd *pulsar.CommandConnect, secret []byte) ([]string, erro
 	if token == "" {
 		return nil, nil
 	}
+	if len(secret) == 0 {
+		return nil, fmt.Errorf("jwt secret not configured")
+	}
 	if strings.HasPrefix(strings.ToLower(token), "bearer ") {
 		token = strings.TrimSpace(token[7:])
 	}
