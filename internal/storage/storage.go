@@ -25,6 +25,14 @@ type Store struct {
 	db *sql.DB
 }
 
+// SubscriptionInitialPosition determines where the subscription cursor starts.
+type SubscriptionInitialPosition int
+
+const (
+	InitialPositionLatest SubscriptionInitialPosition = iota
+	InitialPositionEarliest
+)
+
 // Open creates a new Store backed by the provided SQLite database path.
 // The caller must call InitSchema before serving traffic.
 func Open(path string) (*Store, error) {
@@ -78,6 +86,8 @@ CREATE TABLE IF NOT EXISTS subscriptions (
   topic_id INTEGER NOT NULL,
   name  TEXT NOT NULL,
   type  TEXT NOT NULL DEFAULT 'shared',
+  created_at INTEGER NOT NULL,
+  last_consumer_at INTEGER NOT NULL,
   PRIMARY KEY (topic_id, name),
   FOREIGN KEY (topic_id) REFERENCES topics(id)
 );
@@ -111,13 +121,21 @@ CREATE INDEX IF NOT EXISTS idx_messages_by_topic
 CREATE INDEX IF NOT EXISTS idx_topics_by_namespace
   ON topics(namespace_id, name);
 `
-	_, err := s.db.Exec(schema)
-	return err
+	if _, err := s.db.Exec(schema); err != nil {
+		return err
+	}
+	if err := addColumnIfMissing(s.db, "subscriptions", "created_at", "ALTER TABLE subscriptions ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := addColumnIfMissing(s.db, "subscriptions", "last_consumer_at", "ALTER TABLE subscriptions ADD COLUMN last_consumer_at INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	return nil
 }
 
 // EnsureSubscription ensures the subscription exists and has an initialized cursor.
 // This matches Pulsar's semantics where subscriptions are created on demand.
-func (s *Store) EnsureSubscription(topicName, name string) error {
+func (s *Store) EnsureSubscription(topicName, name string, position SubscriptionInitialPosition) error {
 	info, err := topic.Parse(topicName)
 	if err != nil {
 		return err
@@ -137,18 +155,52 @@ func (s *Store) EnsureSubscription(topicName, name string) error {
 		return err
 	}
 
-	if _, err := tx.Exec(
-		"INSERT OR IGNORE INTO subscriptions(topic_id, name, type) VALUES(?, ?, 'shared')",
+	now := time.Now().UnixMilli()
+	var exists int
+	err = tx.QueryRow(
+		"SELECT 1 FROM subscriptions WHERE topic_id=? AND name=?",
 		topicID, name,
-	); err != nil {
+	).Scan(&exists)
+	if err != nil && err != sql.ErrNoRows {
 		return err
 	}
-
-	if _, err := tx.Exec(
-		"INSERT OR IGNORE INTO subscription_cursor(topic_id, name, next_message_id) VALUES(?, ?, 1)",
-		topicID, name,
-	); err != nil {
-		return err
+	if err == sql.ErrNoRows {
+		nextID := int64(1)
+		if position == InitialPositionLatest {
+			var maxID int64
+			if err := tx.QueryRow(
+				"SELECT COALESCE(MAX(id), 0) FROM messages WHERE topic_id=?",
+				topicID,
+			).Scan(&maxID); err != nil {
+				return err
+			}
+			nextID = maxID + 1
+		}
+		if _, err := tx.Exec(
+			"INSERT INTO subscriptions(topic_id, name, type, created_at, last_consumer_at) VALUES(?, ?, 'shared', ?, ?)",
+			topicID, name, now, now,
+		); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(
+			"INSERT INTO subscription_cursor(topic_id, name, next_message_id) VALUES(?, ?, ?)",
+			topicID, name, nextID,
+		); err != nil {
+			return err
+		}
+	} else {
+		if _, err := tx.Exec(
+			"UPDATE subscriptions SET last_consumer_at=? WHERE topic_id=? AND name=?",
+			now, topicID, name,
+		); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(
+			"INSERT OR IGNORE INTO subscription_cursor(topic_id, name, next_message_id) VALUES(?, ?, 1)",
+			topicID, name,
+		); err != nil {
+			return err
+		}
 	}
 
 	return tx.Commit()
@@ -261,6 +313,13 @@ func (s *Store) ClaimBatch(topicName, sub string, consumerUID int64, limit int) 
 
 	topicID, err := ensureTopic(tx, info)
 	if err != nil {
+		return nil, err
+	}
+
+	if _, err := tx.Exec(
+		"UPDATE subscriptions SET last_consumer_at=? WHERE topic_id=? AND name=?",
+		time.Now().UnixMilli(), topicID, sub,
+	); err != nil {
 		return nil, err
 	}
 
@@ -413,4 +472,32 @@ func ensureTopic(tx *sql.Tx, info topic.Info) (int64, error) {
 	}
 
 	return topicID, nil
+}
+
+func addColumnIfMissing(db *sql.DB, table, column, ddl string) error {
+	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var cid int
+		var name string
+		var ctype string
+		var notnull int
+		var dflt sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return err
+		}
+		if name == column {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_, err = db.Exec(ddl)
+	return err
 }

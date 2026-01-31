@@ -21,15 +21,15 @@ const (
 	ModeOpen   SecurityMode = "open"
 )
 
-// NamespacePolicy is the explicit allowlist per action.
-type NamespacePolicy struct {
+// SecurityNamespacePolicy is the explicit allowlist per action.
+type SecurityNamespacePolicy struct {
 	Allowed map[Action]map[string]struct{}
 }
 
 // SecurityIR is the explicit, efficient representation of authorization data.
 type SecurityIR struct {
 	Mode       SecurityMode
-	Namespaces map[string]NamespacePolicy
+	Namespaces map[string]SecurityNamespacePolicy
 }
 
 // BuildSecurityIR validates and converts config into the runtime IR.
@@ -50,7 +50,7 @@ func BuildSecurityIR(cfg *Config) (*SecurityIR, error) {
 
 	ir := &SecurityIR{
 		Mode:       mode,
-		Namespaces: make(map[string]NamespacePolicy),
+		Namespaces: make(map[string]SecurityNamespacePolicy),
 	}
 
 	for _, ns := range cfg.Namespaces {
@@ -61,7 +61,7 @@ func BuildSecurityIR(cfg *Config) (*SecurityIR, error) {
 		if err != nil {
 			return nil, fmt.Errorf("namespace %q: %w", ns.Name, err)
 		}
-		policyEntry := NamespacePolicy{Allowed: make(map[Action]map[string]struct{})}
+		policyEntry := SecurityNamespacePolicy{Allowed: make(map[Action]map[string]struct{})}
 		if len(ns.Produce) > 0 {
 			policyEntry.Allowed[ActionProduce] = toRoleSet(ns.Produce)
 		}

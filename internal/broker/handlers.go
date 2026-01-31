@@ -170,7 +170,11 @@ func (b *Broker) handleSubscribe(conn net.Conn, base *pulsar.BaseCommand) error 
 	}
 
 	if topicInfo.Persistent {
-		if err := b.store.EnsureSubscription(topicInfo.FullName, sub); err != nil {
+		position := storage.InitialPositionLatest
+		if cmd.InitialPosition != nil && cmd.GetInitialPosition() == pulsar.CommandSubscribe_Earliest {
+			position = storage.InitialPositionEarliest
+		}
+		if err := b.store.EnsureSubscription(topicInfo.FullName, sub, position); err != nil {
 			return fmt.Errorf("ensure subscription: %w", err)
 		}
 	}

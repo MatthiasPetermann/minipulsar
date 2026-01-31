@@ -20,7 +20,7 @@ func TestClaimBatchNoDuplicateAcrossConsumers(t *testing.T) {
 	topic := "persistent://public/default/test"
 	sub := "sub"
 
-	if err := store.EnsureSubscription(topic, sub); err != nil {
+	if err := store.EnsureSubscription(topic, sub, InitialPositionEarliest); err != nil {
 		t.Fatalf("ensure subscription: %v", err)
 	}
 
