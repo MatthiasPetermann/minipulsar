@@ -6,6 +6,8 @@ import "minipulsar/internal/storage"
 type StatsSnapshot struct {
 	Producers     int
 	Consumers     int
+	Namespaces    int
+	Messages      int
 	Topics        int
 	Subscriptions int
 	Pending       int
@@ -27,6 +29,8 @@ func (b *Broker) StatsSnapshot(limit int) (StatsSnapshot, error) {
 	return StatsSnapshot{
 		Producers:     producers,
 		Consumers:     consumers,
+		Namespaces:    storeStats.Namespaces,
+		Messages:      storeStats.Messages,
 		Topics:        storeStats.Topics,
 		Subscriptions: storeStats.Subscriptions,
 		Pending:       storeStats.Pending,

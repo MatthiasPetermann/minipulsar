@@ -9,6 +9,8 @@ type TopicStat struct {
 
 // StatsSnapshot aggregates storage-backed broker stats.
 type StatsSnapshot struct {
+	Namespaces    int
+	Messages      int
 	Topics        int
 	Subscriptions int
 	Pending       int
@@ -28,6 +30,13 @@ func (s *Store) StatsSnapshot(limit int) (StatsSnapshot, error) {
 		return StatsSnapshot{}, err
 	}
 
+	var namespaces int
+	if err := s.db.QueryRow(
+		`SELECT COUNT(*) FROM namespaces`,
+	).Scan(&namespaces); err != nil {
+		return StatsSnapshot{}, err
+	}
+
 	var subs int
 	if err := s.db.QueryRow("SELECT COUNT(*) FROM subscriptions").Scan(&subs); err != nil {
 		return StatsSnapshot{}, err
@@ -35,6 +44,11 @@ func (s *Store) StatsSnapshot(limit int) (StatsSnapshot, error) {
 
 	var pending int
 	if err := s.db.QueryRow("SELECT COUNT(*) FROM subscription_pending").Scan(&pending); err != nil {
+		return StatsSnapshot{}, err
+	}
+
+	var messages int
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM messages").Scan(&messages); err != nil {
 		return StatsSnapshot{}, err
 	}
 
@@ -71,6 +85,8 @@ func (s *Store) StatsSnapshot(limit int) (StatsSnapshot, error) {
 	}
 
 	return StatsSnapshot{
+		Namespaces:    namespaces,
+		Messages:      messages,
 		Topics:        topics,
 		Subscriptions: subs,
 		Pending:       pending,
