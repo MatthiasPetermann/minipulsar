@@ -133,6 +133,8 @@ security {
 namespace "persistent://public/default" {
   produce = ["tester"]
   consume = ["tester"]
+  subscription_timeout_seconds = 3600
+  retention_seconds = 300
 }
 
 function "transform" {
@@ -146,6 +148,13 @@ binding {
   target = "persistent://public/default/temperature.c"
 }
 ```
+
+Namespace policies (within a `namespace` block):
+
+- `subscription_timeout_seconds`: delete subscriptions that have not been served by any consumer within the timeout.
+- `retention_seconds`: retain messages for this duration when a topic has no subscriptions.
+
+Subscription start positions are driven by the Pulsar `SUBSCRIBE` command (`initialPosition`), not by the namespace config.
 
 ---
 
@@ -169,6 +178,7 @@ binding {
   - Subscription cursors + pending delivery tracking
   - Shared subscription delivery (round-robin)
 - Messaging control plane (HCL) with Lua functions and bindings
+- Namespace policies for subscription timeouts and orphaned message retention
 - Prometheus metrics endpoint
 - Optional synthwave TUI dashboard
 

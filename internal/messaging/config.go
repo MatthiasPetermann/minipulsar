@@ -21,9 +21,11 @@ type SecurityConfig struct {
 
 // NamespaceConfig binds a namespace to allowed roles for produce/consume actions.
 type NamespaceConfig struct {
-	Name    string   `hcl:"name,label"`
-	Produce []string `hcl:"produce,optional"`
-	Consume []string `hcl:"consume,optional"`
+	Name                       string   `hcl:"name,label"`
+	Produce                    []string `hcl:"produce,optional"`
+	Consume                    []string `hcl:"consume,optional"`
+	SubscriptionTimeoutSeconds int      `hcl:"subscription_timeout_seconds,optional"`
+	RetentionSeconds           int      `hcl:"retention_seconds,optional"`
 }
 
 // FunctionConfig defines a named Lua function stored on disk.
