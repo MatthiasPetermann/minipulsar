@@ -301,10 +301,14 @@ func (b *Broker) handleSend(conn net.Conn, base *pulsar.BaseCommand, payloadSect
 		PublishTime: int64(meta.GetPublishTime()),
 	}
 	if p.persistent {
-		if err := b.store.InsertMessage(&msg); err != nil {
-			return fmt.Errorf("insert message: %w", err)
+		if b.shouldPersistMessage(p.topic) {
+			if err := b.store.InsertMessage(&msg); err != nil {
+				return fmt.Errorf("insert message: %w", err)
+			}
+			b.kickTopic(p.topic)
+		} else {
+			msg.ID = b.nextNonPersistentID(p.topic)
 		}
-		b.kickTopic(p.topic)
 	} else {
 		msg.ID = b.nextNonPersistentID(p.topic)
 		b.deliverNonPersistent(p.topic, msg)
@@ -364,16 +368,44 @@ func (b *Broker) applyBindings(sourceTopic string, payload []byte) error {
 			PublishTime: time.Now().UnixMilli(),
 		}
 		if targetInfo.Persistent {
-			if err := b.store.InsertMessage(&msg); err != nil {
-				return err
+			if b.shouldPersistMessage(targetInfo.FullName) {
+				if err := b.store.InsertMessage(&msg); err != nil {
+					return err
+				}
+				b.kickTopic(targetInfo.FullName)
+			} else {
+				msg.ID = b.nextNonPersistentID(targetInfo.FullName)
 			}
-			b.kickTopic(targetInfo.FullName)
 		} else {
 			msg.ID = b.nextNonPersistentID(targetInfo.FullName)
 			b.deliverNonPersistent(targetInfo.FullName, msg)
 		}
 	}
 	return nil
+}
+
+func (b *Broker) shouldPersistMessage(topicName string) bool {
+	if b.cfg.Messaging == nil {
+		return true
+	}
+	info, err := topic.Parse(topicName)
+	if err != nil {
+		b.cfg.Logger.Warn("policy lookup failed", "topic", topicName, "err", err)
+		return true
+	}
+	policy, ok := b.cfg.Messaging.PolicyForTopic(info)
+	if !ok {
+		return true
+	}
+	if policy.Retention > 0 {
+		return true
+	}
+	hasSubs, err := b.store.HasSubscriptions(topicName)
+	if err != nil {
+		b.cfg.Logger.Warn("subscription lookup failed", "topic", topicName, "err", err)
+		return true
+	}
+	return hasSubs
 }
 
 // handleFlow applies additional permits to a consumer, enabling delivery.

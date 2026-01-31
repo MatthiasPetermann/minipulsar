@@ -7,7 +7,7 @@ import (
 	"minipulsar/internal/topic"
 )
 
-const namespaceMaintenanceInterval = 30 * time.Second
+const defaultNamespaceMaintenanceInterval = 30 * time.Second
 
 // startNamespaceMaintenance runs cleanup for namespace policies in the background.
 func (b *Broker) startNamespaceMaintenance() {
@@ -15,7 +15,7 @@ func (b *Broker) startNamespaceMaintenance() {
 		return
 	}
 
-	ticker := time.NewTicker(namespaceMaintenanceInterval)
+	ticker := time.NewTicker(b.cfg.NamespaceMaintenanceInterval)
 	go func() {
 		for range ticker.C {
 			b.runNamespaceMaintenance()
@@ -36,20 +36,18 @@ func (b *Broker) runNamespaceMaintenance() {
 				b.dropSubscriptionStates(dropped)
 			}
 		}
-		if policy.Retention > 0 {
-			cutoff := now.Add(-policy.Retention)
-			consumedRemoved, err := b.store.PruneConsumedMessages(namespace, cutoff)
-			if err != nil {
-				b.cfg.Logger.Warn("consumed message retention cleanup failed", "namespace", namespace, "err", err)
-			} else {
-				b.cfg.Logger.Info("consumed message retention cleanup completed", "namespace", namespace, "deleted_messages", consumedRemoved)
-			}
-			removed, err := b.store.PruneOrphanedMessages(namespace, cutoff)
-			if err != nil {
-				b.cfg.Logger.Warn("orphaned message retention cleanup failed", "namespace", namespace, "err", err)
-			} else {
-				b.cfg.Logger.Info("orphaned message retention cleanup completed", "namespace", namespace, "deleted_messages", removed)
-			}
+		cutoff := now.Add(-policy.Retention)
+		consumedRemoved, err := b.store.PruneConsumedMessages(namespace, cutoff)
+		if err != nil {
+			b.cfg.Logger.Warn("consumed message retention cleanup failed", "namespace", namespace, "err", err)
+		} else {
+			b.cfg.Logger.Info("consumed message retention cleanup completed", "namespace", namespace, "deleted_messages", consumedRemoved)
+		}
+		removed, err := b.store.PruneOrphanedMessages(namespace, cutoff)
+		if err != nil {
+			b.cfg.Logger.Warn("orphaned message retention cleanup failed", "namespace", namespace, "err", err)
+		} else {
+			b.cfg.Logger.Info("orphaned message retention cleanup completed", "namespace", namespace, "deleted_messages", removed)
 		}
 		excluded := b.activeTopicsForNamespace(namespace)
 		deleted, err := b.store.PruneEmptyTopics(namespace, excluded)

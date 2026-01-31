@@ -39,6 +39,7 @@ func main() {
 	metricsPath := flag.String("metrics-path", "/metrics", "HTTP path for Prometheus metrics endpoint")
 	metricsInterval := flag.Duration("metrics-interval", 5*time.Second, "interval between metrics collection")
 	metricsTopTopics := flag.Int("metrics-top-topics", 10, "number of top topics to export metrics for")
+	namespaceMaintenanceInterval := flag.Duration("namespace-maintenance-interval", 30*time.Second, "interval between namespace maintenance sweeps")
 	jwtSecret := flag.String("jwt-secret", os.Getenv("MINIPULSAR_JWT_SECRET"), "shared secret for HS256 JWT verification (or set MINIPULSAR_JWT_SECRET)")
 	readTimeout := flag.Duration("read-timeout", 15*time.Second, "maximum time allowed to read a frame from a client (0 to disable)")
 	writeTimeout := flag.Duration("write-timeout", 15*time.Second, "maximum time allowed to write a frame to a client (0 to disable)")
@@ -117,17 +118,18 @@ func main() {
 		}
 
 		b := broker.New(store, broker.Config{
-			Logger:              logger.With("component", "broker"),
-			MaxFrameSize:        uint32(*maxFrame),
-			MaxMessageSize:      int32(*maxMessage),
-			BrokerServiceURL:    *brokerURL,
-			BrokerServiceURLTLS: *brokerURLTLS,
-			ServerVersion:       *serverVersion,
-			Messaging:           messagingRuntime,
-			JWTSecret:           []byte(strings.TrimSpace(*jwtSecret)),
-			TLSConfig:           tlsConfig,
-			ReadTimeout:         *readTimeout,
-			WriteTimeout:        *writeTimeout,
+			Logger:                       logger.With("component", "broker"),
+			MaxFrameSize:                 uint32(*maxFrame),
+			MaxMessageSize:               int32(*maxMessage),
+			BrokerServiceURL:             *brokerURL,
+			BrokerServiceURLTLS:          *brokerURLTLS,
+			ServerVersion:                *serverVersion,
+			Messaging:                    messagingRuntime,
+			JWTSecret:                    []byte(strings.TrimSpace(*jwtSecret)),
+			TLSConfig:                    tlsConfig,
+			ReadTimeout:                  *readTimeout,
+			WriteTimeout:                 *writeTimeout,
+			NamespaceMaintenanceInterval: *namespaceMaintenanceInterval,
 		})
 		if err := startMetricsServer(b, logger, metrics.Config{
 			Logger:         logger.With("component", "metrics"),
@@ -153,6 +155,7 @@ func main() {
 			"tls_enabled", tlsConfig != nil,
 			"read_timeout", readTimeout.String(),
 			"write_timeout", writeTimeout.String(),
+			"namespace_maintenance_interval", namespaceMaintenanceInterval.String(),
 		)
 
 		program := tui.NewProgram(b, logCh)
@@ -181,17 +184,18 @@ func main() {
 	}
 
 	b := broker.New(store, broker.Config{
-		Logger:              logger.With("component", "broker"),
-		MaxFrameSize:        uint32(*maxFrame),
-		MaxMessageSize:      int32(*maxMessage),
-		BrokerServiceURL:    *brokerURL,
-		BrokerServiceURLTLS: *brokerURLTLS,
-		ServerVersion:       *serverVersion,
-		Messaging:           messagingRuntime,
-		JWTSecret:           []byte(strings.TrimSpace(*jwtSecret)),
-		TLSConfig:           tlsConfig,
-		ReadTimeout:         *readTimeout,
-		WriteTimeout:        *writeTimeout,
+		Logger:                       logger.With("component", "broker"),
+		MaxFrameSize:                 uint32(*maxFrame),
+		MaxMessageSize:               int32(*maxMessage),
+		BrokerServiceURL:             *brokerURL,
+		BrokerServiceURLTLS:          *brokerURLTLS,
+		ServerVersion:                *serverVersion,
+		Messaging:                    messagingRuntime,
+		JWTSecret:                    []byte(strings.TrimSpace(*jwtSecret)),
+		TLSConfig:                    tlsConfig,
+		ReadTimeout:                  *readTimeout,
+		WriteTimeout:                 *writeTimeout,
+		NamespaceMaintenanceInterval: *namespaceMaintenanceInterval,
 	})
 	if err := startMetricsServer(b, logger, metrics.Config{
 		Logger:         logger.With("component", "metrics"),
@@ -217,6 +221,7 @@ func main() {
 		"tls_enabled", tlsConfig != nil,
 		"read_timeout", readTimeout.String(),
 		"write_timeout", writeTimeout.String(),
+		"namespace_maintenance_interval", namespaceMaintenanceInterval.String(),
 	)
 
 	errCh, err := startBrokerListeners(b, logger, *addr, *tlsAddr, tlsConfig)
