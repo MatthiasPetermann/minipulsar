@@ -21,9 +21,11 @@ import (
 
 // CLI wiring lives here so application concerns stay outside core broker logic.
 func main() {
-	addr := flag.String("addr", ":6650", "listen address for Pulsar binary protocol")
+	addr := flag.String("addr", ":6650", "listen address for Pulsar binary protocol (empty to disable)")
+	tlsAddr := flag.String("tls-addr", ":6651", "listen address for Pulsar TLS binary protocol (empty to disable)")
 	dbPath := flag.String("db", "./minipulsar.db", "path to sqlite database")
 	brokerURL := flag.String("broker-url", "pulsar://localhost:6650", "broker service URL advertised in LOOKUP responses")
+	brokerURLTLS := flag.String("broker-url-tls", "pulsar+ssl://localhost:6651", "broker TLS service URL advertised in LOOKUP responses (empty to disable)")
 	serverVersion := flag.String("server-version", "minipulsar-0.1", "server version reported to Pulsar clients")
 	maxFrame := flag.Uint("max-frame", 10*1024*1024, "maximum inbound frame size in bytes")
 	maxMessage := flag.Int("max-message", 5*1024*1024, "maximum message size advertised to clients")
@@ -85,6 +87,9 @@ func main() {
 		logger.Error("configure tls", "err", err)
 		os.Exit(1)
 	}
+	if tlsConfig == nil || *tlsAddr == "" {
+		*brokerURLTLS = ""
+	}
 
 	if *enableTUI {
 		logCh := make(chan string, 500)
@@ -112,16 +117,17 @@ func main() {
 		}
 
 		b := broker.New(store, broker.Config{
-			Logger:           logger.With("component", "broker"),
-			MaxFrameSize:     uint32(*maxFrame),
-			MaxMessageSize:   int32(*maxMessage),
-			BrokerServiceURL: *brokerURL,
-			ServerVersion:    *serverVersion,
-			Messaging:        messagingRuntime,
-			JWTSecret:        []byte(strings.TrimSpace(*jwtSecret)),
-			TLSConfig:        tlsConfig,
-			ReadTimeout:      *readTimeout,
-			WriteTimeout:     *writeTimeout,
+			Logger:              logger.With("component", "broker"),
+			MaxFrameSize:        uint32(*maxFrame),
+			MaxMessageSize:      int32(*maxMessage),
+			BrokerServiceURL:    *brokerURL,
+			BrokerServiceURLTLS: *brokerURLTLS,
+			ServerVersion:       *serverVersion,
+			Messaging:           messagingRuntime,
+			JWTSecret:           []byte(strings.TrimSpace(*jwtSecret)),
+			TLSConfig:           tlsConfig,
+			ReadTimeout:         *readTimeout,
+			WriteTimeout:        *writeTimeout,
 		})
 		if err := startMetricsServer(b, logger, metrics.Config{
 			Logger:         logger.With("component", "metrics"),
@@ -136,8 +142,10 @@ func main() {
 
 		logger.Info("starting minipulsar",
 			"addr", *addr,
+			"tls_addr", *tlsAddr,
 			"db", *dbPath,
 			"broker_url", *brokerURL,
+			"broker_url_tls", *brokerURLTLS,
 			"max_frame", *maxFrame,
 			"max_message", *maxMessage,
 			"version", *serverVersion,
@@ -148,8 +156,13 @@ func main() {
 		)
 
 		program := tui.NewProgram(b, logCh)
+		errCh, err := startBrokerListeners(b, logger, *addr, *tlsAddr, tlsConfig)
+		if err != nil {
+			tuiLogger.Error("listen", "err", err)
+			os.Exit(1)
+		}
 		go func() {
-			if err := b.Serve(*addr); err != nil {
+			if err := <-errCh; err != nil {
 				tuiLogger.Error("listen", "err", err)
 				os.Exit(1)
 			}
@@ -168,16 +181,17 @@ func main() {
 	}
 
 	b := broker.New(store, broker.Config{
-		Logger:           logger.With("component", "broker"),
-		MaxFrameSize:     uint32(*maxFrame),
-		MaxMessageSize:   int32(*maxMessage),
-		BrokerServiceURL: *brokerURL,
-		ServerVersion:    *serverVersion,
-		Messaging:        messagingRuntime,
-		JWTSecret:        []byte(strings.TrimSpace(*jwtSecret)),
-		TLSConfig:        tlsConfig,
-		ReadTimeout:      *readTimeout,
-		WriteTimeout:     *writeTimeout,
+		Logger:              logger.With("component", "broker"),
+		MaxFrameSize:        uint32(*maxFrame),
+		MaxMessageSize:      int32(*maxMessage),
+		BrokerServiceURL:    *brokerURL,
+		BrokerServiceURLTLS: *brokerURLTLS,
+		ServerVersion:       *serverVersion,
+		Messaging:           messagingRuntime,
+		JWTSecret:           []byte(strings.TrimSpace(*jwtSecret)),
+		TLSConfig:           tlsConfig,
+		ReadTimeout:         *readTimeout,
+		WriteTimeout:        *writeTimeout,
 	})
 	if err := startMetricsServer(b, logger, metrics.Config{
 		Logger:         logger.With("component", "metrics"),
@@ -192,8 +206,10 @@ func main() {
 
 	logger.Info("starting minipulsar",
 		"addr", *addr,
+		"tls_addr", *tlsAddr,
 		"db", *dbPath,
 		"broker_url", *brokerURL,
+		"broker_url_tls", *brokerURLTLS,
 		"max_frame", *maxFrame,
 		"max_message", *maxMessage,
 		"version", *serverVersion,
@@ -203,7 +219,12 @@ func main() {
 		"write_timeout", writeTimeout.String(),
 	)
 
-	if err := b.Serve(*addr); err != nil {
+	errCh, err := startBrokerListeners(b, logger, *addr, *tlsAddr, tlsConfig)
+	if err != nil {
+		logger.Error("listen", "err", err)
+		os.Exit(1)
+	}
+	if err := <-errCh; err != nil {
 		logger.Error("listen", "err", err)
 		os.Exit(1)
 	}
@@ -236,6 +257,32 @@ func startMetricsServer(b *broker.Broker, logger *logging.Logger, cfg metrics.Co
 		"metrics_top", cfg.TopTopicsLimit,
 	)
 	return nil
+}
+
+func startBrokerListeners(b *broker.Broker, logger *logging.Logger, addr string, tlsAddr string, tlsConfig *tls.Config) (<-chan error, error) {
+	errCh := make(chan error, 2)
+	started := 0
+	if addr != "" {
+		started++
+		go func() {
+			errCh <- b.ServeWithTLS(addr, nil)
+		}()
+	}
+	if tlsConfig != nil && tlsAddr != "" {
+		started++
+		go func() {
+			errCh <- b.ServeWithTLS(tlsAddr, tlsConfig)
+		}()
+	}
+	if started == 0 {
+		return nil, fmt.Errorf("no broker listeners configured")
+	}
+	logger.Info("broker listeners started",
+		"addr", addr,
+		"tls_addr", tlsAddr,
+		"tls_enabled", tlsConfig != nil,
+	)
+	return errCh, nil
 }
 
 func parseLogLevel(raw string) (slog.Level, error) {

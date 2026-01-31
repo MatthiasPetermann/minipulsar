@@ -85,6 +85,13 @@ func (b *Broker) handleLookup(conn net.Conn, base *pulsar.BaseCommand) error {
 			RequestId:        proto.Uint64(cmd.GetRequestId()),
 			Response:         pulsar.CommandLookupTopicResponse_Connect.Enum(),
 			BrokerServiceUrl: proto.String(b.cfg.BrokerServiceURL),
+			BrokerServiceUrlTls: func() *string {
+				if b.cfg.BrokerServiceURLTLS == "" {
+					return nil
+				}
+				value := b.cfg.BrokerServiceURLTLS
+				return &value
+			}(),
 		},
 	}
 	return b.writeCommand(conn, resp)
