@@ -153,6 +153,8 @@ Namespace policies (within a `namespace` block):
 
 - `subscription_timeout_seconds`: delete subscriptions that have not been served by any consumer within the timeout.
 - `retention_seconds`: retain messages for this duration when a topic has no subscriptions.
+- Empty topic cleanup runs during namespace maintenance and deletes topics with no messages, no subscriptions,
+  and no active producers/consumers. Topics referenced by function bindings are preserved.
 
 Subscription start positions are driven by the Pulsar `SUBSCRIBE` command (`initialPosition`), not by the namespace config.
 

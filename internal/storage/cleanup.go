@@ -121,6 +121,50 @@ func (s *Store) PruneOrphanedMessages(namespace string, cutoff time.Time) (int64
 	return affected, nil
 }
 
+// PruneEmptyTopics removes topics without messages or subscriptions.
+func (s *Store) PruneEmptyTopics(namespace string, exclude []string) (int64, error) {
+	info, err := topic.Parse(namespace + "/__validate")
+	if err != nil {
+		return 0, err
+	}
+	if !info.Persistent {
+		return 0, nil
+	}
+	query := `DELETE FROM topics
+		WHERE id IN (
+			SELECT t.id
+			  FROM topics t
+			  JOIN namespaces n ON n.id = t.namespace_id
+			 WHERE n.tenant = ? AND n.name = ?
+			   AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.topic_id = t.id)
+			   AND NOT EXISTS (SELECT 1 FROM subscriptions s WHERE s.topic_id = t.id)`
+	args := []any{info.Tenant, info.Namespace}
+	if len(exclude) > 0 {
+		query += " AND t.full_name NOT IN ("
+		for i := range exclude {
+			if i > 0 {
+				query += ","
+			}
+			query += "?"
+		}
+		query += ")"
+		for _, name := range exclude {
+			args = append(args, name)
+		}
+	}
+	query += ")"
+
+	res, err := s.db.Exec(query, args...)
+	if err != nil {
+		return 0, err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return affected, nil
+}
+
 func scanSubscriptionCursor(db *sql.DB, sub string) (int64, error) {
 	var nextID int64
 	err := db.QueryRow(
