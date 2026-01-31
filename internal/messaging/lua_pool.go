@@ -1,10 +1,15 @@
 package messaging
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
+	"os"
+	"time"
 
-	"github.com/sirupsen/logrus"
 	lua "github.com/yuin/gopher-lua"
+
+	"minipulsar/internal/logging"
 )
 
 // FunctionContext provides metadata for Lua functions.
@@ -28,12 +33,12 @@ type functionResult struct {
 
 // FunctionPool executes Lua functions using a bounded worker pool.
 type FunctionPool struct {
-	logger *logrus.Entry
+	logger *logging.Logger
 	tasks  chan functionTask
 }
 
 // NewFunctionPool creates a pool with the requested number of Lua workers.
-func NewFunctionPool(registry *FunctionRegistry, workers int, logger *logrus.Entry) (*FunctionPool, error) {
+func NewFunctionPool(registry *FunctionRegistry, workers int, logger *logging.Logger) (*FunctionPool, error) {
 	if registry == nil {
 		return nil, fmt.Errorf("function registry is required")
 	}
@@ -41,7 +46,15 @@ func NewFunctionPool(registry *FunctionRegistry, workers int, logger *logrus.Ent
 		return nil, fmt.Errorf("worker count must be positive")
 	}
 	if logger == nil {
-		logger = logrus.New().WithField("component", "lua-pool")
+		defaultLogger, err := logging.New(logging.Options{
+			Format:        "text",
+			WithTimestamp: true,
+			Level:         slog.LevelInfo,
+			Writer:        os.Stdout,
+		})
+		if err == nil {
+			logger = defaultLogger.With("component", "lua-pool")
+		}
 	}
 	pool := &FunctionPool{
 		logger: logger,
@@ -53,7 +66,7 @@ func NewFunctionPool(registry *FunctionRegistry, workers int, logger *logrus.Ent
 		if err != nil {
 			return nil, err
 		}
-		go worker.loop(pool.tasks, pool.logger.WithField("worker", i))
+		go worker.loop(pool.tasks, pool.logger.With("worker", i))
 	}
 	return pool, nil
 }
@@ -76,14 +89,19 @@ func (p *FunctionPool) Execute(functionID string, payload []byte, ctx FunctionCo
 
 type luaWorker struct {
 	state     *lua.LState
-	functions map[string]*lua.LFunction
+	functions map[string]luaFunction
+}
+
+type luaFunction struct {
+	fn         *lua.LFunction
+	maxRuntime time.Duration
 }
 
 func newLuaWorker(registry *FunctionRegistry) (*luaWorker, error) {
 	state := lua.NewState()
 	openSafeLibs(state)
 
-	functions := make(map[string]*lua.LFunction, len(registry.Functions))
+	functions := make(map[string]luaFunction, len(registry.Functions))
 	for id, fn := range registry.Functions {
 		if err := state.DoFile(fn.Path); err != nil {
 			state.Close()
@@ -95,18 +113,18 @@ func newLuaWorker(registry *FunctionRegistry) (*luaWorker, error) {
 			state.Close()
 			return nil, fmt.Errorf("function %q missing handle entrypoint", id)
 		}
-		functions[id] = lfn
+		functions[id] = luaFunction{fn: lfn, maxRuntime: fn.MaxRuntime}
 		state.SetGlobal("handle", lua.LNil)
 	}
 
 	return &luaWorker{state: state, functions: functions}, nil
 }
 
-func (w *luaWorker) loop(tasks <-chan functionTask, logger *logrus.Entry) {
+func (w *luaWorker) loop(tasks <-chan functionTask, logger *logging.Logger) {
 	for task := range tasks {
 		payload, err := w.execute(task.functionID, task.payload, task.ctx)
 		if err != nil {
-			logger.WithError(err).WithField("function_id", task.functionID).Warn("lua execution failed")
+			logger.Warn("lua execution failed", "err", err, "function_id", task.functionID)
 		}
 		task.resultCh <- functionResult{payload: payload, err: err}
 	}
@@ -114,7 +132,7 @@ func (w *luaWorker) loop(tasks <-chan functionTask, logger *logrus.Entry) {
 
 func (w *luaWorker) execute(functionID string, payload []byte, ctx FunctionContext) ([]byte, error) {
 	fn := w.functions[functionID]
-	if fn == nil {
+	if fn.fn == nil {
 		return nil, fmt.Errorf("unknown function %q", functionID)
 	}
 
@@ -123,8 +141,17 @@ func (w *luaWorker) execute(functionID string, payload []byte, ctx FunctionConte
 	ctxTable.RawSetString("source_topic", lua.LString(ctx.SourceTopic))
 	ctxTable.RawSetString("target_topic", lua.LString(ctx.TargetTopic))
 
+	if fn.maxRuntime > 0 {
+		runCtx, cancel := context.WithTimeout(context.Background(), fn.maxRuntime)
+		w.state.SetContext(runCtx)
+		defer func() {
+			cancel()
+			w.state.RemoveContext()
+		}()
+	}
+
 	if err := w.state.CallByParam(lua.P{
-		Fn:      fn,
+		Fn:      fn.fn,
 		NRet:    1,
 		Protect: true,
 	}, lua.LString(string(payload)), ctxTable); err != nil {

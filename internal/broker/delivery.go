@@ -109,10 +109,11 @@ func (b *Broker) deliveryLoopShared(s *subState) {
 
 		msgs, err := b.store.ClaimBatch(s.key.topic, s.key.name, c.uid, limit)
 		if err != nil {
-			b.cfg.Logger.WithFields(map[string]interface{}{
-				"topic":        s.key.topic,
-				"subscription": s.key.name,
-			}).WithError(err).Warn("claim error")
+			b.cfg.Logger.Warn("claim error",
+				"err", err,
+				"topic", s.key.topic,
+				"subscription", s.key.name,
+			)
 			return
 		}
 		if len(msgs) == 0 {
@@ -122,7 +123,7 @@ func (b *Broker) deliveryLoopShared(s *subState) {
 		for _, m := range msgs {
 			// send (write serialized per conn)
 			if err := b.writeMsgFrame(c.conn, c.id, m); err != nil {
-				b.cfg.Logger.WithField("consumer_id", c.id).WithError(err).Warn("deliver write error")
+				b.cfg.Logger.Warn("deliver write error", "err", err, "consumer_id", c.id)
 				// keep pending; disconnect/timeout will clean it up
 				return
 			}

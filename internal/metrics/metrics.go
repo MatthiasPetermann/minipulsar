@@ -3,15 +3,16 @@ package metrics
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
+	"os"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/sirupsen/logrus"
-
 	"minipulsar/internal/broker"
+	"minipulsar/internal/logging"
 	"minipulsar/internal/storage"
 )
 
@@ -23,7 +24,7 @@ const (
 
 // Config controls the Prometheus metrics server.
 type Config struct {
-	Logger         logrus.FieldLogger
+	Logger         *logging.Logger
 	ListenAddr     string
 	Path           string
 	ScrapeInterval time.Duration
@@ -37,7 +38,7 @@ type Server struct {
 	server *http.Server
 	stopCh chan struct{}
 	wg     sync.WaitGroup
-	logger logrus.FieldLogger
+	logger *logging.Logger
 
 	mu       sync.RWMutex
 	snapshot metricsSnapshot
@@ -71,7 +72,15 @@ func NewServer(b *broker.Broker, cfg Config) (*Server, error) {
 	}
 	logger := cfg.Logger
 	if logger == nil {
-		logger = logrus.StandardLogger()
+		defaultLogger, err := logging.New(logging.Options{
+			Format:        "text",
+			WithTimestamp: true,
+			Level:         slog.LevelInfo,
+			Writer:        os.Stdout,
+		})
+		if err == nil {
+			logger = defaultLogger
+		}
 	}
 
 	mux := http.NewServeMux()
@@ -101,7 +110,7 @@ func (s *Server) Start() {
 	go func() {
 		defer s.wg.Done()
 		if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			s.logger.WithError(err).Warn("metrics server stopped")
+			s.logger.Warn("metrics server stopped", "err", err)
 		}
 	}()
 }
@@ -112,7 +121,7 @@ func (s *Server) Stop() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := s.server.Shutdown(shutdownCtx); err != nil {
-		s.logger.WithError(err).Warn("metrics shutdown failed")
+		s.logger.Warn("metrics shutdown failed", "err", err)
 	}
 	s.wg.Wait()
 }
@@ -140,7 +149,7 @@ func (s *Server) collectOnce() {
 		s.mu.Lock()
 		s.snapshot.ScrapeErrors++
 		s.mu.Unlock()
-		s.logger.WithError(err).Warn("metrics scrape failed")
+		s.logger.Warn("metrics scrape failed", "err", err)
 		return
 	}
 

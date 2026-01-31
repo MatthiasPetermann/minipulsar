@@ -28,8 +28,9 @@ type NamespaceConfig struct {
 
 // FunctionConfig defines a named Lua function stored on disk.
 type FunctionConfig struct {
-	ID   string `hcl:"id,label"`
-	Path string `hcl:"path"`
+	ID         string `hcl:"id,label"`
+	Path       string `hcl:"path"`
+	MaxRuntime string `hcl:"max_runtime,optional"`
 }
 
 // BindingConfig routes a source topic through a Lua function into a target topic.

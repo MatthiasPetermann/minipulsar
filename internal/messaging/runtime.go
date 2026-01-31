@@ -2,12 +2,13 @@ package messaging
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"regexp"
 	"strings"
+	"time"
 
-	"github.com/sirupsen/logrus"
-
+	"minipulsar/internal/logging"
 	"minipulsar/internal/topic"
 )
 
@@ -20,9 +21,16 @@ type Binding struct {
 	TargetTopic string
 }
 
+// FunctionSpec captures validated function metadata.
+type FunctionSpec struct {
+	ID         string
+	Path       string
+	MaxRuntime time.Duration
+}
+
 // FunctionRegistry holds validated function metadata.
 type FunctionRegistry struct {
-	Functions map[string]FunctionConfig
+	Functions map[string]FunctionSpec
 }
 
 // Runtime carries the parsed configuration and execution helpers.
@@ -31,12 +39,12 @@ type Runtime struct {
 	Functions *FunctionRegistry
 	Bindings  map[string][]Binding
 	Pool      *FunctionPool
-	Logger    *logrus.Entry
+	Logger    *logging.Logger
 }
 
 // Options configures runtime creation.
 type Options struct {
-	Logger        *logrus.Entry
+	Logger        *logging.Logger
 	WorkerCount   int
 	ValidateFuncs bool
 }
@@ -48,14 +56,22 @@ func BuildRuntime(cfg *Config, opts Options) (*Runtime, error) {
 	}
 	logger := opts.Logger
 	if logger == nil {
-		logger = logrus.New().WithField("component", "messaging")
+		defaultLogger, err := logging.New(logging.Options{
+			Format:        "text",
+			WithTimestamp: true,
+			Level:         slog.LevelInfo,
+			Writer:        os.Stdout,
+		})
+		if err == nil {
+			logger = defaultLogger.With("component", "messaging")
+		}
 	}
 	securityIR, err := BuildSecurityIR(cfg)
 	if err != nil {
 		return nil, err
 	}
 
-	registry := &FunctionRegistry{Functions: make(map[string]FunctionConfig)}
+	registry := &FunctionRegistry{Functions: make(map[string]FunctionSpec)}
 	for _, fn := range cfg.Functions {
 		if fn.ID == "" {
 			return nil, fmt.Errorf("function id is required")
@@ -72,7 +88,22 @@ func BuildRuntime(cfg *Config, opts Options) (*Runtime, error) {
 		if _, exists := registry.Functions[fn.ID]; exists {
 			return nil, fmt.Errorf("duplicate function id %q", fn.ID)
 		}
-		registry.Functions[fn.ID] = fn
+		var maxRuntime time.Duration
+		if strings.TrimSpace(fn.MaxRuntime) != "" {
+			parsed, err := time.ParseDuration(fn.MaxRuntime)
+			if err != nil {
+				return nil, fmt.Errorf("function %q invalid max_runtime: %w", fn.ID, err)
+			}
+			if parsed <= 0 {
+				return nil, fmt.Errorf("function %q max_runtime must be positive", fn.ID)
+			}
+			maxRuntime = parsed
+		}
+		registry.Functions[fn.ID] = FunctionSpec{
+			ID:         fn.ID,
+			Path:       fn.Path,
+			MaxRuntime: maxRuntime,
+		}
 	}
 
 	bindings := make(map[string][]Binding)

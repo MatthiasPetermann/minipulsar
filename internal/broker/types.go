@@ -1,12 +1,14 @@
 package broker
 
 import (
+	"crypto/tls"
+	"log/slog"
 	"net"
+	"os"
 	"sync"
 	"sync/atomic"
 
-	"github.com/sirupsen/logrus"
-
+	"minipulsar/internal/logging"
 	"minipulsar/internal/messaging"
 	"minipulsar/internal/storage"
 )
@@ -16,7 +18,7 @@ import (
 // such as maximum message size and advertised broker URL.
 type Config struct {
 	// Logger is the base logger used by the broker for all connection and protocol events.
-	Logger *logrus.Entry
+	Logger *logging.Logger
 	// MaxFrameSize limits inbound frames to avoid allocating unbounded memory.
 	MaxFrameSize uint32
 	// MaxMessageSize is reported to clients during CONNECT as protocol metadata.
@@ -29,6 +31,8 @@ type Config struct {
 	Messaging *messaging.Runtime
 	// JWTSecret is the shared secret used to verify HS256 JWTs from clients.
 	JWTSecret []byte
+	// TLSConfig enables TLS for the broker listener when non-nil.
+	TLSConfig *tls.Config
 }
 
 // producerKey scopes producer identifiers by connection to avoid collisions
@@ -117,7 +121,15 @@ type subState struct {
 func New(store *storage.Store, cfg Config) *Broker {
 	logger := cfg.Logger
 	if logger == nil {
-		logger = logrus.New().WithField("component", "broker")
+		defaultLogger, err := logging.New(logging.Options{
+			Format:        "text",
+			WithTimestamp: true,
+			Level:         slog.LevelInfo,
+			Writer:        os.Stdout,
+		})
+		if err == nil {
+			logger = defaultLogger.With("component", "broker")
+		}
 	}
 	if cfg.MaxFrameSize == 0 {
 		cfg.MaxFrameSize = 10 * 1024 * 1024

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"hash/crc32"
 	"io"
 	"net"
 	"time"
@@ -33,10 +34,10 @@ func (b *Broker) handleConnect(conn net.Conn, base *pulsar.BaseCommand) error {
 		b.connRoles[conn] = roles
 		b.mu.Unlock()
 	}
-	b.cfg.Logger.WithFields(map[string]interface{}{
-		"client_version":   cmd.GetClientVersion(),
-		"protocol_version": cmd.GetProtocolVersion(),
-	}).Info("CONNECT")
+	b.cfg.Logger.Info("CONNECT",
+		"client_version", cmd.GetClientVersion(),
+		"protocol_version", cmd.GetProtocolVersion(),
+	)
 
 	resp := &pulsar.BaseCommand{
 		Type: pulsar.BaseCommand_CONNECTED.Enum(),
@@ -56,7 +57,7 @@ func (b *Broker) handlePartitionedMetadata(conn net.Conn, base *pulsar.BaseComma
 	if cmd == nil {
 		return fmt.Errorf("PARTITIONED_METADATA without payload")
 	}
-	b.cfg.Logger.WithField("topic", cmd.GetTopic()).Info("PARTITIONED_METADATA")
+	b.cfg.Logger.Info("PARTITIONED_METADATA", "topic", cmd.GetTopic())
 
 	resp := &pulsar.BaseCommand{
 		Type: pulsar.BaseCommand_PARTITIONED_METADATA_RESPONSE.Enum(),
@@ -76,7 +77,7 @@ func (b *Broker) handleLookup(conn net.Conn, base *pulsar.BaseCommand) error {
 	if cmd == nil {
 		return fmt.Errorf("LOOKUP without CommandLookupTopic")
 	}
-	b.cfg.Logger.WithField("topic", cmd.GetTopic()).Info("LOOKUP")
+	b.cfg.Logger.Info("LOOKUP", "topic", cmd.GetTopic())
 
 	resp := &pulsar.BaseCommand{
 		Type: pulsar.BaseCommand_LOOKUP_RESPONSE.Enum(),
@@ -124,11 +125,11 @@ func (b *Broker) handleProducer(conn net.Conn, base *pulsar.BaseCommand) error {
 	}
 	b.mu.Unlock()
 
-	b.cfg.Logger.WithFields(map[string]interface{}{
-		"producer_id": producerID,
-		"topic":       topicInfo.FullName,
-		"name":        name,
-	}).Info("PRODUCER")
+	b.cfg.Logger.Info("PRODUCER",
+		"producer_id", producerID,
+		"topic", topicInfo.FullName,
+		"name", name,
+	)
 
 	resp := &pulsar.BaseCommand{
 		Type: pulsar.BaseCommand_PRODUCER_SUCCESS.Enum(),
@@ -194,12 +195,12 @@ func (b *Broker) handleSubscribe(conn net.Conn, base *pulsar.BaseCommand) error 
 	s.consumers = append(s.consumers, c)
 	s.mu.Unlock()
 
-	b.cfg.Logger.WithFields(map[string]interface{}{
-		"consumer_id":  consumerID,
-		"consumer_uid": c.uid,
-		"topic":        topicInfo.FullName,
-		"subscription": sub,
-	}).Info("SUBSCRIBE")
+	b.cfg.Logger.Info("SUBSCRIBE",
+		"consumer_id", consumerID,
+		"consumer_uid", c.uid,
+		"topic", topicInfo.FullName,
+		"subscription", sub,
+	)
 
 	resp := &pulsar.BaseCommand{
 		Type: pulsar.BaseCommand_SUCCESS.Enum(),
@@ -242,7 +243,7 @@ func (b *Broker) handleSend(conn net.Conn, base *pulsar.BaseCommand, payloadSect
 		return fmt.Errorf("unexpected magic 0x%x", magic)
 	}
 
-	// Skip checksum (CRC32C).
+	// Read checksum (CRC32C).
 	var checksumBuf [4]byte
 	if _, err := io.ReadFull(r, checksumBuf[:]); err != nil {
 		return fmt.Errorf("read checksum: %w", err)
@@ -270,6 +271,14 @@ func (b *Broker) handleSend(conn net.Conn, base *pulsar.BaseCommand, payloadSect
 	if err != nil {
 		return fmt.Errorf("read payload: %w", err)
 	}
+	checksum := binary.BigEndian.Uint32(checksumBuf[:])
+	hasher := crc32.New(crc32.MakeTable(crc32.Castagnoli))
+	_, _ = hasher.Write(metaSizeBuf[:])
+	_, _ = hasher.Write(metaBytes)
+	_, _ = hasher.Write(payload)
+	if checksum != hasher.Sum32() {
+		return fmt.Errorf("payload checksum mismatch")
+	}
 
 	msg := storage.Message{
 		Topic:       p.topic,
@@ -287,15 +296,15 @@ func (b *Broker) handleSend(conn net.Conn, base *pulsar.BaseCommand, payloadSect
 		b.deliverNonPersistent(p.topic, msg)
 	}
 
-	b.cfg.Logger.WithFields(map[string]interface{}{
-		"topic":       p.topic,
-		"producer_id": producerID,
-		"message_id":  msg.ID,
-		"size":        len(payload),
-	}).Info("SEND")
+	b.cfg.Logger.Info("SEND",
+		"topic", p.topic,
+		"producer_id", producerID,
+		"message_id", msg.ID,
+		"size", len(payload),
+	)
 
 	if err := b.applyBindings(p.topic, payload); err != nil {
-		b.cfg.Logger.WithError(err).WithField("topic", p.topic).Warn("binding processing failed")
+		b.cfg.Logger.Warn("binding processing failed", "err", err, "topic", p.topic)
 	}
 
 	resp := &pulsar.BaseCommand{
@@ -432,18 +441,18 @@ func (b *Broker) handleAck(conn net.Conn, base *pulsar.BaseCommand) error {
 	case pulsar.CommandAck_Cumulative:
 		// Shared semantics: cumulative ack is not meaningful and breaks correctness.
 		// We ignore it (or you could treat it as Individual for the given id only).
-		b.cfg.Logger.WithFields(map[string]interface{}{
-			"consumer_id":  consumerID,
-			"topic":        topic,
-			"subscription": sub,
-		}).Warn("ACK cumulative ignored (shared)")
+		b.cfg.Logger.Warn("ACK cumulative ignored (shared)",
+			"consumer_id", consumerID,
+			"topic", topic,
+			"subscription", sub,
+		)
 		return nil
 
 	default:
-		b.cfg.Logger.WithFields(map[string]interface{}{
-			"consumer_id": consumerID,
-			"ack_type":    cmd.GetAckType(),
-		}).Warn("ACK unsupported type")
+		b.cfg.Logger.Warn("ACK unsupported type",
+			"consumer_id", consumerID,
+			"ack_type", cmd.GetAckType(),
+		)
 		return nil
 	}
 
@@ -471,7 +480,7 @@ func (b *Broker) handleCloseProducer(conn net.Conn, base *pulsar.BaseCommand) er
 
 	key := producerKey{conn: conn, id: cmd.GetProducerId()}
 
-	b.cfg.Logger.WithField("producer_id", cmd.GetProducerId()).Info("CLOSE_PRODUCER")
+	b.cfg.Logger.Info("CLOSE_PRODUCER", "producer_id", cmd.GetProducerId())
 
 	b.mu.Lock()
 	delete(b.producers, key)
@@ -493,7 +502,7 @@ func (b *Broker) handleCloseConsumer(conn net.Conn, base *pulsar.BaseCommand) er
 		return fmt.Errorf("CLOSE_CONSUMER without payload")
 	}
 
-	b.cfg.Logger.WithField("consumer_id", cmd.GetConsumerId()).Info("CLOSE_CONSUMER")
+	b.cfg.Logger.Info("CLOSE_CONSUMER", "consumer_id", cmd.GetConsumerId())
 
 	b.removeConsumer(consumerKey{conn: conn, id: cmd.GetConsumerId()})
 
