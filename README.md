@@ -252,6 +252,10 @@ This project is for **learning, prototyping, and edge experiments**.
 For production environments, full Apache Pulsar is the right choice.
 
 If you want to help make the **Edge Broker** real: issues, feedback, and PRs are welcome.
+For more on my Pulsar work, see the ongoing notes and articles tagged here:
+https://www.petermann-digital.de/tags/pulsar/
+If you are looking for a **Pulsar expert**, feel free to reach out via:
+https://www.petermann-digital.de
 
 ---
 
