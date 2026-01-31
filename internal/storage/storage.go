@@ -32,6 +32,8 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
+	db.SetMaxOpenConns(4)
+	db.SetMaxIdleConns(4)
 	return &Store{db: db}, nil
 }
 
@@ -46,6 +48,7 @@ func (s *Store) DB() *sql.DB {
 func (s *Store) InitSchema() error {
 	schema := `
 PRAGMA journal_mode=WAL;
+PRAGMA busy_timeout=5000;
 
 CREATE TABLE IF NOT EXISTS namespaces (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -299,7 +302,7 @@ func (s *Store) ClaimBatch(topicName, sub string, consumerUID int64, limit int) 
 	defer rows.Close()
 
 	var res []Message
-	var lastID int64
+	var lastSeenID int64
 	now := time.Now().UnixMilli()
 
 	for rows.Next() {
@@ -307,28 +310,36 @@ func (s *Store) ClaimBatch(topicName, sub string, consumerUID int64, limit int) 
 		if err := rows.Scan(&m.ID, &m.Topic, &m.Payload, &m.PublishTime, &m.SequenceID); err != nil {
 			return nil, err
 		}
+		lastSeenID = m.ID
 
 		// Insert pending (guarantees no other consumer can claim it later).
-		if _, err := tx.Exec(
+		result, err := tx.Exec(
 			"INSERT OR IGNORE INTO subscription_pending(topic_id, name, message_id, consumer_id, delivered_at) VALUES(?,?,?,?,?)",
 			topicID, sub, m.ID, consumerUID, now,
-		); err != nil {
+		)
+		if err != nil {
 			return nil, err
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return nil, err
+		}
+		if affected == 0 {
+			continue
 		}
 
 		res = append(res, m)
-		lastID = m.ID
 	}
 
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 
-	// Advance cursor monotonically to lastID+1 (dispatch cursor).
-	if len(res) > 0 {
+	// Advance cursor monotonically to last seen message ID + 1 (dispatch cursor).
+	if lastSeenID > 0 {
 		if _, err := tx.Exec(
 			"UPDATE subscription_cursor SET next_message_id=? WHERE topic_id=? AND name=?",
-			lastID+1, topicID, sub,
+			lastSeenID+1, topicID, sub,
 		); err != nil {
 			return nil, err
 		}

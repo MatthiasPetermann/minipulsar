@@ -271,6 +271,9 @@ func (b *Broker) handleSend(conn net.Conn, base *pulsar.BaseCommand, payloadSect
 	if err != nil {
 		return fmt.Errorf("read payload: %w", err)
 	}
+	if b.cfg.MaxMessageSize > 0 && len(payload) > int(b.cfg.MaxMessageSize) {
+		return fmt.Errorf("message payload too large: %d bytes", len(payload))
+	}
 	checksum := binary.BigEndian.Uint32(checksumBuf[:])
 	hasher := crc32.New(crc32.MakeTable(crc32.Castagnoli))
 	_, _ = hasher.Write(metaSizeBuf[:])

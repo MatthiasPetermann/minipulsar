@@ -83,7 +83,7 @@ Personal motivation: I originally wanted to run Apache Pulsar on NetBSD. While P
   - Normalized schema (tenant → namespace → topic)
   - Subscription cursor and pending delivery tables
   - Shared subscription delivery (round-robin)
-  - Non-persistent topics are memory-only
+  - Non-persistent topics are memory-only and best-effort (messages drop if no consumer has permits)
 - Messaging control plane (HCL) with Lua functions and bindings
 - Prometheus metrics endpoint
 - Optional synthwave TUI dashboard
@@ -103,6 +103,14 @@ Personal motivation: I originally wanted to run Apache Pulsar on NetBSD. While P
 - Edge systems often communicate over public networks or insecure Wi‑Fi.
 - TLS is the minimum required for confidentiality and integrity.
 - It enables secure client‑to‑broker connections without extra tunnels.
+
+**Security initiative 2 (current workstream):**
+
+- Enforce max message sizes during SEND.
+- Add per-connection read/write timeouts to harden against slow clients.
+- Strengthen SQLite concurrency safety with busy timeouts.
+- Guard shared subscription claims against duplicate delivery.
+- Begin introducing focused tests.
 
 ---
 
@@ -276,6 +284,8 @@ that exceeds the duration (e.g. `250ms`, `2s`). Omitted or empty means unlimited
 - `-metrics-top-topics` – number of top topics in metrics
 - `-jwt-secret` – HS256 secret (or set `MINIPULSAR_JWT_SECRET`)
 - `-tui` – enable synthwave TUI
+- `-read-timeout` – maximum duration to read a frame (0 disables)
+- `-write-timeout` – maximum duration to write a frame (0 disables)
 - `-tls-cert` – TLS server certificate PEM (enables TLS)
 - `-tls-key` – TLS server private key PEM
 
