@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/sirupsen/logrus"
 
@@ -12,6 +13,7 @@ import (
 
 	"minipulsar/internal/broker"
 	"minipulsar/internal/messaging"
+	"minipulsar/internal/metrics"
 	"minipulsar/internal/storage"
 	"minipulsar/internal/tui"
 )
@@ -30,6 +32,10 @@ func main() {
 	enableTUI := flag.Bool("tui", false, "enable synthwave TUI dashboard")
 	messagingConfig := flag.String("messaging-config", "", "path to messaging control-plane HCL config")
 	functionWorkers := flag.Int("function-workers", 4, "number of Lua function workers")
+	metricsAddr := flag.String("metrics-addr", "127.0.0.1:8080", "listen address for Prometheus metrics endpoint (empty to disable)")
+	metricsPath := flag.String("metrics-path", "/metrics", "HTTP path for Prometheus metrics endpoint")
+	metricsInterval := flag.Duration("metrics-interval", 5*time.Second, "interval between metrics collection")
+	metricsTopTopics := flag.Int("metrics-top-topics", 10, "number of top topics to export metrics for")
 	flag.Parse()
 
 	logger := logrus.New()
@@ -87,6 +93,26 @@ func main() {
 		ServerVersion:    *serverVersion,
 		Messaging:        messagingRuntime,
 	})
+
+	if *metricsAddr != "" {
+		metricsServer, err := metrics.NewServer(b, metrics.Config{
+			Logger:         logger.WithField("component", "metrics"),
+			ListenAddr:     *metricsAddr,
+			Path:           *metricsPath,
+			ScrapeInterval: *metricsInterval,
+			TopTopicsLimit: *metricsTopTopics,
+		})
+		if err != nil {
+			logger.WithError(err).Fatal("init metrics")
+		}
+		metricsServer.Start()
+		logger.WithFields(map[string]interface{}{
+			"metrics_addr":     *metricsAddr,
+			"metrics_path":     *metricsPath,
+			"metrics_interval": metricsInterval.String(),
+			"metrics_top":      *metricsTopTopics,
+		}).Info("metrics endpoint started")
+	}
 
 	logger.WithFields(map[string]interface{}{
 		"addr":        *addr,
