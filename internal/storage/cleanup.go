@@ -121,6 +121,44 @@ func (s *Store) PruneOrphanedMessages(namespace string, cutoff time.Time) (int64
 	return affected, nil
 }
 
+// PruneConsumedMessages removes messages that have been consumed by all subscriptions.
+func (s *Store) PruneConsumedMessages(namespace string, cutoff time.Time) (int64, error) {
+	info, err := topic.Parse(namespace + "/__validate")
+	if err != nil {
+		return 0, err
+	}
+	if !info.Persistent {
+		return 0, nil
+	}
+	res, err := s.db.Exec(
+		`DELETE FROM messages
+		 WHERE publish_time < ?
+		   AND topic_id IN (
+			 SELECT t.id
+			   FROM topics t
+			   JOIN namespaces n ON n.id = t.namespace_id
+			  WHERE n.tenant = ? AND n.name = ?
+			    AND EXISTS (SELECT 1 FROM subscriptions s WHERE s.topic_id = t.id)
+		   )
+		   AND id < (
+			 SELECT MIN(c.next_message_id)
+			   FROM subscription_cursor c
+			  WHERE c.topic_id = messages.topic_id
+		   )`,
+		cutoff.UnixMilli(),
+		info.Tenant,
+		info.Namespace,
+	)
+	if err != nil {
+		return 0, err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return affected, nil
+}
+
 // PruneEmptyTopics removes topics without messages or subscriptions.
 func (s *Store) PruneEmptyTopics(namespace string, exclude []string) (int64, error) {
 	info, err := topic.Parse(namespace + "/__validate")

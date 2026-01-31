@@ -152,7 +152,9 @@ binding {
 Namespace policies (within a `namespace` block):
 
 - `subscription_timeout_seconds`: delete subscriptions that have not been served by any consumer within the timeout.
-- `retention_seconds`: retain messages for this duration when a topic has no subscriptions.
+- `retention_seconds`: retain messages for this duration. Messages are removed once they are older than
+  the retention window and have been consumed by all subscriptions. Topics with no subscriptions are
+  cleaned up based on the same retention window.
 - Empty topic cleanup runs during namespace maintenance and deletes topics with no messages, no subscriptions,
   and no active producers/consumers. Topics referenced by function bindings are preserved.
 
