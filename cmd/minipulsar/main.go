@@ -5,7 +5,6 @@ import (
 	"crypto/x509"
 	"flag"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"strings"
@@ -14,6 +13,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 
 	"minipulsar/internal/broker"
+	"minipulsar/internal/logging"
 	"minipulsar/internal/messaging"
 	"minipulsar/internal/metrics"
 	"minipulsar/internal/storage"
@@ -49,7 +49,12 @@ func main() {
 		fmt.Fprintf(os.Stderr, "invalid log-level %q: %v\n", *logLevel, err)
 		os.Exit(2)
 	}
-	logger, err := newLogger(*logFormat, *logTimestamp, level, os.Stdout)
+	logger, err := logging.New(logging.Options{
+		Format:        *logFormat,
+		WithTimestamp: *logTimestamp,
+		Level:         level,
+		Writer:        os.Stdout,
+	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
@@ -65,14 +70,114 @@ func main() {
 		os.Exit(1)
 	}
 
-	var messagingRuntime *messaging.Runtime
+	var messagingCfg *messaging.Config
 	if *messagingConfig != "" {
 		cfg, err := messaging.LoadConfig(*messagingConfig)
 		if err != nil {
 			logger.Error("load messaging config", "err", err)
 			os.Exit(1)
 		}
-		runtime, err := messaging.BuildRuntime(cfg, messaging.Options{
+		messagingCfg = cfg
+	}
+
+	tlsConfig, err := buildTLSConfig(*tlsCert, *tlsKey, *tlsClientCA)
+	if err != nil {
+		logger.Error("configure tls", "err", err)
+		os.Exit(1)
+	}
+
+	if *enableTUI {
+		logCh := make(chan string, 500)
+		tuiLogger, err := logging.New(logging.Options{
+			Format:        *logFormat,
+			WithTimestamp: *logTimestamp,
+			Level:         level,
+			Writer: tui.NewLogWriter(func(line string) {
+				select {
+				case logCh <- line:
+				default:
+				}
+			}),
+		})
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		logger = tuiLogger
+
+		var messagingRuntime *messaging.Runtime
+		if messagingCfg != nil {
+			runtime, err := messaging.BuildRuntime(messagingCfg, messaging.Options{
+				Logger:        logger.With("component", "messaging"),
+				WorkerCount:   *functionWorkers,
+				ValidateFuncs: true,
+			})
+			if err != nil {
+				logger.Error("init messaging runtime", "err", err)
+				os.Exit(1)
+			}
+			messagingRuntime = runtime
+		}
+
+		b := broker.New(store, broker.Config{
+			Logger:           logger.With("component", "broker"),
+			MaxFrameSize:     uint32(*maxFrame),
+			MaxMessageSize:   int32(*maxMessage),
+			BrokerServiceURL: *brokerURL,
+			ServerVersion:    *serverVersion,
+			Messaging:        messagingRuntime,
+			JWTSecret:        []byte(strings.TrimSpace(*jwtSecret)),
+			TLSConfig:        tlsConfig,
+		})
+		if *metricsAddr != "" {
+			metricsServer, err := metrics.NewServer(b, metrics.Config{
+				Logger:         logger.With("component", "metrics"),
+				ListenAddr:     *metricsAddr,
+				Path:           *metricsPath,
+				ScrapeInterval: *metricsInterval,
+				TopTopicsLimit: *metricsTopTopics,
+			})
+			if err != nil {
+				logger.Error("init metrics", "err", err)
+				os.Exit(1)
+			}
+			metricsServer.Start()
+			logger.Info("metrics endpoint started",
+				"metrics_addr", *metricsAddr,
+				"metrics_path", *metricsPath,
+				"metrics_interval", metricsInterval.String(),
+				"metrics_top", *metricsTopTopics,
+			)
+		}
+
+		logger.Info("starting minipulsar",
+			"addr", *addr,
+			"db", *dbPath,
+			"broker_url", *brokerURL,
+			"max_frame", *maxFrame,
+			"max_message", *maxMessage,
+			"version", *serverVersion,
+			"messaging", *messagingConfig,
+			"tls_enabled", tlsConfig != nil,
+		)
+
+		program := tui.NewProgram(b, logCh)
+		go func() {
+			if err := b.Serve(*addr); err != nil {
+				tuiLogger.Error("listen", "err", err)
+				os.Exit(1)
+			}
+		}()
+		if err := program.Start(); err != nil {
+			tuiLogger.Error("tui", "err", err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	var messagingRuntime *messaging.Runtime
+	if messagingCfg != nil {
+		runtime, err := messaging.BuildRuntime(messagingCfg, messaging.Options{
 			Logger:        logger.With("component", "messaging"),
 			WorkerCount:   *functionWorkers,
 			ValidateFuncs: true,
@@ -82,12 +187,6 @@ func main() {
 			os.Exit(1)
 		}
 		messagingRuntime = runtime
-	}
-
-	tlsConfig, err := buildTLSConfig(*tlsCert, *tlsKey, *tlsClientCA)
-	if err != nil {
-		logger.Error("configure tls", "err", err)
-		os.Exit(1)
 	}
 
 	b := broker.New(store, broker.Config{
@@ -100,7 +199,6 @@ func main() {
 		JWTSecret:        []byte(strings.TrimSpace(*jwtSecret)),
 		TLSConfig:        tlsConfig,
 	})
-
 	if *metricsAddr != "" {
 		metricsServer, err := metrics.NewServer(b, metrics.Config{
 			Logger:         logger.With("component", "metrics"),
@@ -133,33 +231,6 @@ func main() {
 		"tls_enabled", tlsConfig != nil,
 	)
 
-	if *enableTUI {
-		logCh := make(chan string, 500)
-		tuiLogger, err := newLogger(*logFormat, *logTimestamp, level, tui.NewLogWriter(func(line string) {
-			select {
-			case logCh <- line:
-			default:
-			}
-		}))
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(2)
-		}
-
-		program := tui.NewProgram(b, logCh)
-		go func() {
-			if err := b.Serve(*addr); err != nil {
-				tuiLogger.Error("listen", "err", err)
-				os.Exit(1)
-			}
-		}()
-		if err := program.Start(); err != nil {
-			tuiLogger.Error("tui", "err", err)
-			os.Exit(1)
-		}
-		return
-	}
-
 	if err := b.Serve(*addr); err != nil {
 		logger.Error("listen", "err", err)
 		os.Exit(1)
@@ -180,28 +251,6 @@ func parseLogLevel(raw string) (slog.Level, error) {
 		return slog.LevelError, nil
 	default:
 		return slog.LevelInfo, fmt.Errorf("unknown level: %s", raw)
-	}
-}
-
-func newLogger(format string, withTimestamp bool, level slog.Level, out io.Writer) (*slog.Logger, error) {
-	opts := &slog.HandlerOptions{
-		Level: level,
-	}
-	if !withTimestamp {
-		opts.ReplaceAttr = func(_ []string, attr slog.Attr) slog.Attr {
-			if attr.Key == slog.TimeKey {
-				return slog.Attr{}
-			}
-			return attr
-		}
-	}
-	switch strings.ToLower(format) {
-	case "text":
-		return slog.New(slog.NewTextHandler(out, opts)), nil
-	case "json":
-		return slog.New(slog.NewJSONHandler(out, opts)), nil
-	default:
-		return nil, fmt.Errorf("invalid log-format %q (expected text or json)", format)
 	}
 }
 

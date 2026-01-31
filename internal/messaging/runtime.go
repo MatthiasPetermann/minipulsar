@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"minipulsar/internal/logging"
 	"minipulsar/internal/topic"
 )
 
@@ -38,12 +39,12 @@ type Runtime struct {
 	Functions *FunctionRegistry
 	Bindings  map[string][]Binding
 	Pool      *FunctionPool
-	Logger    *slog.Logger
+	Logger    *logging.Logger
 }
 
 // Options configures runtime creation.
 type Options struct {
-	Logger        *slog.Logger
+	Logger        *logging.Logger
 	WorkerCount   int
 	ValidateFuncs bool
 }
@@ -55,7 +56,15 @@ func BuildRuntime(cfg *Config, opts Options) (*Runtime, error) {
 	}
 	logger := opts.Logger
 	if logger == nil {
-		logger = slog.New(slog.NewTextHandler(os.Stdout, nil)).With("component", "messaging")
+		defaultLogger, err := logging.New(logging.Options{
+			Format:        "text",
+			WithTimestamp: true,
+			Level:         slog.LevelInfo,
+			Writer:        os.Stdout,
+		})
+		if err == nil {
+			logger = defaultLogger.With("component", "messaging")
+		}
 	}
 	securityIR, err := BuildSecurityIR(cfg)
 	if err != nil {

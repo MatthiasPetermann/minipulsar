@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"minipulsar/internal/broker"
+	"minipulsar/internal/logging"
 	"minipulsar/internal/storage"
 )
 
@@ -23,7 +24,7 @@ const (
 
 // Config controls the Prometheus metrics server.
 type Config struct {
-	Logger         *slog.Logger
+	Logger         *logging.Logger
 	ListenAddr     string
 	Path           string
 	ScrapeInterval time.Duration
@@ -37,7 +38,7 @@ type Server struct {
 	server *http.Server
 	stopCh chan struct{}
 	wg     sync.WaitGroup
-	logger *slog.Logger
+	logger *logging.Logger
 
 	mu       sync.RWMutex
 	snapshot metricsSnapshot
@@ -71,7 +72,15 @@ func NewServer(b *broker.Broker, cfg Config) (*Server, error) {
 	}
 	logger := cfg.Logger
 	if logger == nil {
-		logger = slog.New(slog.NewTextHandler(os.Stdout, nil))
+		defaultLogger, err := logging.New(logging.Options{
+			Format:        "text",
+			WithTimestamp: true,
+			Level:         slog.LevelInfo,
+			Writer:        os.Stdout,
+		})
+		if err == nil {
+			logger = defaultLogger
+		}
 	}
 
 	mux := http.NewServeMux()

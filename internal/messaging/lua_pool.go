@@ -8,6 +8,8 @@ import (
 	"time"
 
 	lua "github.com/yuin/gopher-lua"
+
+	"minipulsar/internal/logging"
 )
 
 // FunctionContext provides metadata for Lua functions.
@@ -31,12 +33,12 @@ type functionResult struct {
 
 // FunctionPool executes Lua functions using a bounded worker pool.
 type FunctionPool struct {
-	logger *slog.Logger
+	logger *logging.Logger
 	tasks  chan functionTask
 }
 
 // NewFunctionPool creates a pool with the requested number of Lua workers.
-func NewFunctionPool(registry *FunctionRegistry, workers int, logger *slog.Logger) (*FunctionPool, error) {
+func NewFunctionPool(registry *FunctionRegistry, workers int, logger *logging.Logger) (*FunctionPool, error) {
 	if registry == nil {
 		return nil, fmt.Errorf("function registry is required")
 	}
@@ -44,7 +46,15 @@ func NewFunctionPool(registry *FunctionRegistry, workers int, logger *slog.Logge
 		return nil, fmt.Errorf("worker count must be positive")
 	}
 	if logger == nil {
-		logger = slog.New(slog.NewTextHandler(os.Stdout, nil)).With("component", "lua-pool")
+		defaultLogger, err := logging.New(logging.Options{
+			Format:        "text",
+			WithTimestamp: true,
+			Level:         slog.LevelInfo,
+			Writer:        os.Stdout,
+		})
+		if err == nil {
+			logger = defaultLogger.With("component", "lua-pool")
+		}
 	}
 	pool := &FunctionPool{
 		logger: logger,
@@ -110,7 +120,7 @@ func newLuaWorker(registry *FunctionRegistry) (*luaWorker, error) {
 	return &luaWorker{state: state, functions: functions}, nil
 }
 
-func (w *luaWorker) loop(tasks <-chan functionTask, logger *slog.Logger) {
+func (w *luaWorker) loop(tasks <-chan functionTask, logger *logging.Logger) {
 	for task := range tasks {
 		payload, err := w.execute(task.functionID, task.payload, task.ctx)
 		if err != nil {
