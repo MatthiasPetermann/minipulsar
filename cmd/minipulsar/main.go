@@ -188,7 +188,7 @@ func newLogger(format string, withTimestamp bool, level slog.Level, out io.Write
 		Level: level,
 	}
 	if !withTimestamp {
-		opts.ReplaceAttr = func(_ []slog.Attr, attr slog.Attr) slog.Attr {
+		opts.ReplaceAttr = func(_ []string, attr slog.Attr) slog.Attr {
 			if attr.Key == slog.TimeKey {
 				return slog.Attr{}
 			}
