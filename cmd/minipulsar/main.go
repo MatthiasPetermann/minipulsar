@@ -11,6 +11,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 
 	"minipulsar/internal/broker"
+	"minipulsar/internal/messaging"
 	"minipulsar/internal/storage"
 	"minipulsar/internal/tui"
 )
@@ -27,6 +28,8 @@ func main() {
 	logFormat := flag.String("log-format", "text", "log format (text or json)")
 	logTimestamp := flag.Bool("log-timestamp", true, "include timestamps in log output")
 	enableTUI := flag.Bool("tui", false, "enable synthwave TUI dashboard")
+	messagingConfig := flag.String("messaging-config", "", "path to messaging control-plane HCL config")
+	functionWorkers := flag.Int("function-workers", 4, "number of Lua function workers")
 	flag.Parse()
 
 	logger := logrus.New()
@@ -59,12 +62,30 @@ func main() {
 		logger.WithError(err).Fatal("init db schema")
 	}
 
+	var messagingRuntime *messaging.Runtime
+	if *messagingConfig != "" {
+		cfg, err := messaging.LoadConfig(*messagingConfig)
+		if err != nil {
+			logger.WithError(err).Fatal("load messaging config")
+		}
+		runtime, err := messaging.BuildRuntime(cfg, messaging.Options{
+			Logger:        logger.WithField("component", "messaging"),
+			WorkerCount:   *functionWorkers,
+			ValidateFuncs: true,
+		})
+		if err != nil {
+			logger.WithError(err).Fatal("init messaging runtime")
+		}
+		messagingRuntime = runtime
+	}
+
 	b := broker.New(store, broker.Config{
 		Logger:           logger.WithField("component", "broker"),
 		MaxFrameSize:     uint32(*maxFrame),
 		MaxMessageSize:   int32(*maxMessage),
 		BrokerServiceURL: *brokerURL,
 		ServerVersion:    *serverVersion,
+		Messaging:        messagingRuntime,
 	})
 
 	logger.WithFields(map[string]interface{}{
@@ -74,6 +95,7 @@ func main() {
 		"max_frame":   *maxFrame,
 		"max_message": *maxMessage,
 		"version":     *serverVersion,
+		"messaging":   *messagingConfig,
 	}).Info("starting minipulsar")
 
 	if *enableTUI {

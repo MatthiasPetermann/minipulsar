@@ -7,6 +7,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 
+	"minipulsar/internal/messaging"
 	"minipulsar/internal/storage"
 )
 
@@ -24,6 +25,8 @@ type Config struct {
 	BrokerServiceURL string
 	// ServerVersion is returned during CONNECT to identify this broker.
 	ServerVersion string
+	// Messaging configures optional messaging control-plane runtime behavior.
+	Messaging *messaging.Runtime
 }
 
 // producerKey scopes producer identifiers by connection to avoid collisions
@@ -63,6 +66,9 @@ type Broker struct {
 
 	// nextConsumerUID is a server-side unique consumer uid (used in DB pending).
 	nextConsumerUID int64
+
+	// connRoles caches roles extracted from CONNECT authentication payloads.
+	connRoles map[net.Conn][]string
 }
 
 // producer represents a logical producer created by a client connection.
@@ -132,6 +138,7 @@ func New(store *storage.Store, cfg Config) *Broker {
 		consumers:        make(map[consumerKey]*consumer),
 		subs:             make(map[subKey]*subState),
 		nonPersistentSeq: make(map[string]uint64),
+		connRoles:        make(map[net.Conn][]string),
 	}
 }
 

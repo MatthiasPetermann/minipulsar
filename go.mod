@@ -6,8 +6,10 @@ require (
 	github.com/charmbracelet/bubbles v0.16.1
 	github.com/charmbracelet/bubbletea v0.25.0
 	github.com/charmbracelet/lipgloss v0.9.1
+	github.com/hashicorp/hcl/v2 v2.20.0
 	github.com/mattn/go-sqlite3 v1.14.22
 	github.com/sirupsen/logrus v0.0.0
+	github.com/yuin/gopher-lua v1.1.1
 	google.golang.org/protobuf v1.33.0
 )
 

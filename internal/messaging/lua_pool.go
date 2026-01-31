@@ -1,0 +1,162 @@
+package messaging
+
+import (
+	"fmt"
+
+	"github.com/sirupsen/logrus"
+	lua "github.com/yuin/gopher-lua"
+)
+
+// FunctionContext provides metadata for Lua functions.
+type FunctionContext struct {
+	FunctionID  string
+	SourceTopic string
+	TargetTopic string
+}
+
+type functionTask struct {
+	functionID string
+	payload    []byte
+	ctx        FunctionContext
+	resultCh   chan functionResult
+}
+
+type functionResult struct {
+	payload []byte
+	err     error
+}
+
+// FunctionPool executes Lua functions using a bounded worker pool.
+type FunctionPool struct {
+	logger *logrus.Entry
+	tasks  chan functionTask
+}
+
+// NewFunctionPool creates a pool with the requested number of Lua workers.
+func NewFunctionPool(registry *FunctionRegistry, workers int, logger *logrus.Entry) (*FunctionPool, error) {
+	if registry == nil {
+		return nil, fmt.Errorf("function registry is required")
+	}
+	if workers <= 0 {
+		return nil, fmt.Errorf("worker count must be positive")
+	}
+	if logger == nil {
+		logger = logrus.New().WithField("component", "lua-pool")
+	}
+	pool := &FunctionPool{
+		logger: logger,
+		tasks:  make(chan functionTask),
+	}
+
+	for i := 0; i < workers; i++ {
+		worker, err := newLuaWorker(registry)
+		if err != nil {
+			return nil, err
+		}
+		go worker.loop(pool.tasks, pool.logger.WithField("worker", i))
+	}
+	return pool, nil
+}
+
+// Execute runs a Lua function and returns the transformed payload.
+func (p *FunctionPool) Execute(functionID string, payload []byte, ctx FunctionContext) ([]byte, error) {
+	if p == nil {
+		return nil, fmt.Errorf("function pool is nil")
+	}
+	resultCh := make(chan functionResult, 1)
+	p.tasks <- functionTask{
+		functionID: functionID,
+		payload:    payload,
+		ctx:        ctx,
+		resultCh:   resultCh,
+	}
+	result := <-resultCh
+	return result.payload, result.err
+}
+
+type luaWorker struct {
+	state     *lua.LState
+	functions map[string]*lua.LFunction
+}
+
+func newLuaWorker(registry *FunctionRegistry) (*luaWorker, error) {
+	state := lua.NewState()
+	openSafeLibs(state)
+
+	functions := make(map[string]*lua.LFunction, len(registry.Functions))
+	for id, fn := range registry.Functions {
+		if err := state.DoFile(fn.Path); err != nil {
+			state.Close()
+			return nil, fmt.Errorf("load function %q: %w", id, err)
+		}
+		value := state.GetGlobal("handle")
+		lfn, ok := value.(*lua.LFunction)
+		if !ok {
+			state.Close()
+			return nil, fmt.Errorf("function %q missing handle entrypoint", id)
+		}
+		functions[id] = lfn
+		state.SetGlobal("handle", lua.LNil)
+	}
+
+	return &luaWorker{state: state, functions: functions}, nil
+}
+
+func (w *luaWorker) loop(tasks <-chan functionTask, logger *logrus.Entry) {
+	for task := range tasks {
+		payload, err := w.execute(task.functionID, task.payload, task.ctx)
+		if err != nil {
+			logger.WithError(err).WithField("function_id", task.functionID).Warn("lua execution failed")
+		}
+		task.resultCh <- functionResult{payload: payload, err: err}
+	}
+}
+
+func (w *luaWorker) execute(functionID string, payload []byte, ctx FunctionContext) ([]byte, error) {
+	fn := w.functions[functionID]
+	if fn == nil {
+		return nil, fmt.Errorf("unknown function %q", functionID)
+	}
+
+	ctxTable := w.state.NewTable()
+	ctxTable.RawSetString("function_id", lua.LString(ctx.FunctionID))
+	ctxTable.RawSetString("source_topic", lua.LString(ctx.SourceTopic))
+	ctxTable.RawSetString("target_topic", lua.LString(ctx.TargetTopic))
+
+	if err := w.state.CallByParam(lua.P{
+		Fn:      fn,
+		NRet:    1,
+		Protect: true,
+	}, lua.LString(string(payload)), ctxTable); err != nil {
+		return nil, err
+	}
+
+	ret := w.state.Get(-1)
+	w.state.Pop(1)
+	value, ok := ret.(lua.LString)
+	if !ok {
+		return nil, fmt.Errorf("function %q returned non-string payload", functionID)
+	}
+	return []byte(value), nil
+}
+
+func openSafeLibs(state *lua.LState) {
+	lua.OpenBase(state)
+	lua.OpenTable(state)
+	lua.OpenString(state)
+	lua.OpenMath(state)
+}
+
+func validateLuaFunction(path string) error {
+	state := lua.NewState()
+	defer state.Close()
+	openSafeLibs(state)
+	if err := state.DoFile(path); err != nil {
+		return err
+	}
+	value := state.GetGlobal("handle")
+	if _, ok := value.(*lua.LFunction); !ok {
+		return fmt.Errorf("handle entrypoint not found")
+	}
+	return nil
+}

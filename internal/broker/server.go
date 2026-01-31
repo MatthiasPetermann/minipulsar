@@ -81,6 +81,10 @@ func (b *Broker) cleanupConnection(conn net.Conn) {
 		b.mu.Unlock()
 	}
 
+	b.mu.Lock()
+	delete(b.connRoles, conn)
+	b.mu.Unlock()
+
 	for _, k := range consumerKeys {
 		b.removeConsumer(k)
 	}
