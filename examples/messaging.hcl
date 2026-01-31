@@ -1,5 +1,5 @@
 security {
-  mode = "strict"
+  mode = "open"
 }
 
 namespace "persistent://public/default" {

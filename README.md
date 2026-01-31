@@ -50,7 +50,7 @@ Personal motivation: I originally wanted to run Apache Pulsar on NetBSD. While P
 - A minimal broker for edge deployments.
 - Portable (already runs on NetBSD).
 - JWT-based authentication.
-- Policies as a human-readable DSL (HCL); only functions are Lua.
+- Policies as a human-readable DSL (HCL)
 - Pulsar Functions (Lua) for edge transformations.
 
 ### Non-goals (for now)
