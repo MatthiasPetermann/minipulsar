@@ -17,8 +17,6 @@ packages fit together at a high level.
 - `internal/logging`: Uniform slog-based logger wrapper.
 - `internal/tui`: Optional Bubble Tea dashboard and log streaming helper.
 - `internal/topic`: Parsing utilities for Pulsar topic names.
-- `internal/third_party/logrus`: Minimal logrus clone (not currently wired into
-  the runtime, but included for compatibility or future use).
 - `pb`: Pulsar protocol protobuf definition and generated Go bindings.
 - `examples`: Sample HCL config and Lua function.
 
