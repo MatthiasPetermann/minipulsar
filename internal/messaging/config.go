@@ -16,8 +16,7 @@ type Config struct {
 
 // SecurityConfig defines the default authorization behavior.
 type SecurityConfig struct {
-	Mode          string `hcl:"mode"`
-	DefaultPolicy string `hcl:"default_policy"`
+	Mode string `hcl:"mode"`
 }
 
 // NamespaceConfig binds a namespace to allowed roles for produce/consume actions.
