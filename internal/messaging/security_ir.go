@@ -21,14 +21,6 @@ const (
 	ModeOpen   SecurityMode = "open"
 )
 
-// Policy determines default allow/deny behavior.
-type Policy string
-
-const (
-	PolicyAllow Policy = "allow"
-	PolicyDeny  Policy = "deny"
-)
-
 // NamespacePolicy is the explicit allowlist per action.
 type NamespacePolicy struct {
 	Allowed map[Action]map[string]struct{}
@@ -36,9 +28,8 @@ type NamespacePolicy struct {
 
 // SecurityIR is the explicit, efficient representation of authorization data.
 type SecurityIR struct {
-	Mode          SecurityMode
-	DefaultPolicy Policy
-	Namespaces    map[string]NamespacePolicy
+	Mode       SecurityMode
+	Namespaces map[string]NamespacePolicy
 }
 
 // BuildSecurityIR validates and converts config into the runtime IR.
@@ -57,20 +48,9 @@ func BuildSecurityIR(cfg *Config) (*SecurityIR, error) {
 		return nil, fmt.Errorf("unsupported security mode %q", cfg.Security.Mode)
 	}
 
-	policy := Policy(strings.ToLower(strings.TrimSpace(cfg.Security.DefaultPolicy)))
-	if policy == "" {
-		return nil, fmt.Errorf("security default_policy is required")
-	}
-	switch policy {
-	case PolicyAllow, PolicyDeny:
-	default:
-		return nil, fmt.Errorf("unsupported security default_policy %q", cfg.Security.DefaultPolicy)
-	}
-
 	ir := &SecurityIR{
-		Mode:          mode,
-		DefaultPolicy: policy,
-		Namespaces:    make(map[string]NamespacePolicy),
+		Mode:       mode,
+		Namespaces: make(map[string]NamespacePolicy),
 	}
 
 	for _, ns := range cfg.Namespaces {
@@ -102,18 +82,18 @@ func (s *SecurityIR) Allows(namespace string, action Action, roles []string) boo
 	if namespace == "" {
 		return false
 	}
+	if s.Mode == ModeOpen {
+		return true
+	}
 
 	nsPolicy, ok := s.Namespaces[namespace]
 	if !ok {
-		if s.Mode == ModeStrict {
-			return false
-		}
-		return s.DefaultPolicy == PolicyAllow
+		return false
 	}
 
 	allowedRoles, ok := nsPolicy.Allowed[action]
 	if !ok || len(allowedRoles) == 0 {
-		return s.DefaultPolicy == PolicyAllow
+		return false
 	}
 
 	for _, role := range roles {
