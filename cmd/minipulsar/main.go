@@ -2,7 +2,6 @@ package main
 
 import (
 	"crypto/tls"
-	"crypto/x509"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -41,7 +40,6 @@ func main() {
 	jwtSecret := flag.String("jwt-secret", os.Getenv("MINIPULSAR_JWT_SECRET"), "shared secret for HS256 JWT verification (or set MINIPULSAR_JWT_SECRET)")
 	tlsCert := flag.String("tls-cert", "", "path to TLS certificate PEM (enables TLS)")
 	tlsKey := flag.String("tls-key", "", "path to TLS private key PEM (enables TLS)")
-	tlsClientCA := flag.String("tls-client-ca", "", "optional path to client CA bundle PEM for mTLS")
 	flag.Parse()
 
 	level, err := parseLogLevel(*logLevel)
@@ -80,7 +78,7 @@ func main() {
 		messagingCfg = cfg
 	}
 
-	tlsConfig, err := buildTLSConfig(*tlsCert, *tlsKey, *tlsClientCA)
+	tlsConfig, err := buildTLSConfig(*tlsCert, *tlsKey)
 	if err != nil {
 		logger.Error("configure tls", "err", err)
 		os.Exit(1)
@@ -254,8 +252,8 @@ func parseLogLevel(raw string) (slog.Level, error) {
 	}
 }
 
-func buildTLSConfig(certPath, keyPath, clientCAPath string) (*tls.Config, error) {
-	if certPath == "" && keyPath == "" && clientCAPath == "" {
+func buildTLSConfig(certPath, keyPath string) (*tls.Config, error) {
+	if certPath == "" && keyPath == "" {
 		return nil, nil
 	}
 	if certPath == "" || keyPath == "" {
@@ -268,18 +266,6 @@ func buildTLSConfig(certPath, keyPath, clientCAPath string) (*tls.Config, error)
 	cfg := &tls.Config{
 		Certificates: []tls.Certificate{cert},
 		MinVersion:   tls.VersionTLS12,
-	}
-	if clientCAPath != "" {
-		caPEM, err := os.ReadFile(clientCAPath)
-		if err != nil {
-			return nil, fmt.Errorf("read client ca: %w", err)
-		}
-		pool := x509.NewCertPool()
-		if !pool.AppendCertsFromPEM(caPEM) {
-			return nil, fmt.Errorf("invalid client ca pem")
-		}
-		cfg.ClientCAs = pool
-		cfg.ClientAuth = tls.RequireAndVerifyClientCert
 	}
 	return cfg, nil
 }

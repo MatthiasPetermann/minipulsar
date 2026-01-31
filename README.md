@@ -1,6 +1,8 @@
 # minipulsar – Edge-ready, minimal Pulsar-compatible broker (PoC)
 
 **minipulsar** is a deliberately lean, Apache Pulsar-compatible broker written in Go.
+It is an opinionated implementation that stays intentionally simple and easy to
+reason about.
 It is built for protocol exploration, edge experiments, and lightweight deployments
 where you want Pulsar compatibility without running a full Pulsar cluster.
 
@@ -16,7 +18,7 @@ compatible with the Pulsar protocol. That means:
 - **Edge-first:** runs on small hardware, minimal footprint, simple deploys.
 - **Protocol-compatible:** standard Pulsar clients can connect.
 - **Secure-by-design:** authentication and policies already exist today.
-- **TLS is a near-term goal:** transport encryption is explicitly on the roadmap.
+- **TLS support:** transport encryption is available for secure connections.
 
 Why this matters:
 
@@ -94,7 +96,7 @@ Personal motivation: I originally wanted to run Apache Pulsar on NetBSD. While P
 
 - ✅ Stabilize the protocol stack
 - ✅ Improve edge ergonomics (smaller, simpler, more reliable)
-- 🔜 **TLS support** (transport encryption as a requirement for real edge deployments)
+- ✅ **TLS support** (transport encryption as a requirement for real edge deployments)
 
 **Why TLS now:**
 
@@ -172,35 +174,6 @@ Run the broker with TLS:
   -db ./minipulsar.db \
   -tls-cert ./server.crt \
   -tls-key ./server.key
-```
-
-### mTLS (optional client certificate verification)
-
-Create a simple CA and sign a server cert:
-
-```bash
-openssl req -x509 -newkey rsa:2048 -nodes \
-  -keyout ca.key -out ca.crt \
-  -days 365 -subj "/CN=minipulsar-ca"
-
-openssl req -newkey rsa:2048 -nodes \
-  -keyout server.key -out server.csr \
-  -subj "/CN=localhost"
-
-openssl x509 -req -in server.csr \
-  -CA ca.crt -CAkey ca.key -CAcreateserial \
-  -out server.crt -days 365
-```
-
-Start the broker and require client certificates:
-
-```bash
-./bin/minipulsar \
-  -addr :6650 \
-  -db ./minipulsar.db \
-  -tls-cert ./server.crt \
-  -tls-key ./server.key \
-  -tls-client-ca ./ca.crt
 ```
 
 ---
@@ -305,7 +278,6 @@ that exceeds the duration (e.g. `250ms`, `2s`). Omitted or empty means unlimited
 - `-tui` – enable synthwave TUI
 - `-tls-cert` – TLS server certificate PEM (enables TLS)
 - `-tls-key` – TLS server private key PEM
-- `-tls-client-ca` – optional client CA bundle (mTLS)
 
 ---
 
