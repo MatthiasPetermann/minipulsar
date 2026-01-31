@@ -26,6 +26,8 @@ type Config struct {
 	MaxMessageSize int32
 	// BrokerServiceURL is returned in LOOKUP responses so clients can connect.
 	BrokerServiceURL string
+	// BrokerServiceURLTLS is returned in LOOKUP responses for TLS-capable clients.
+	BrokerServiceURLTLS string
 	// ServerVersion is returned during CONNECT to identify this broker.
 	ServerVersion string
 	// Messaging configures optional messaging control-plane runtime behavior.
@@ -144,6 +146,9 @@ func New(store *storage.Store, cfg Config) *Broker {
 	}
 	if cfg.BrokerServiceURL == "" {
 		cfg.BrokerServiceURL = "pulsar://localhost:6650"
+	}
+	if cfg.BrokerServiceURLTLS == "" && cfg.TLSConfig != nil {
+		cfg.BrokerServiceURLTLS = "pulsar+ssl://localhost:6651"
 	}
 	if cfg.ServerVersion == "" {
 		cfg.ServerVersion = "minipulsar-0.1"

@@ -15,17 +15,23 @@ import (
 // Serve listens for TCP connections and starts a goroutine per connection.
 // It blocks forever until the listener fails.
 func (b *Broker) Serve(addr string) error {
+	return b.ServeWithTLS(addr, b.cfg.TLSConfig)
+}
+
+// ServeWithTLS listens for TCP connections with an optional TLS config.
+// It blocks forever until the listener fails.
+func (b *Broker) ServeWithTLS(addr string, tlsConfig *tls.Config) error {
 	var ln net.Listener
 	var err error
-	if b.cfg.TLSConfig != nil {
-		ln, err = tls.Listen("tcp", addr, b.cfg.TLSConfig)
+	if tlsConfig != nil {
+		ln, err = tls.Listen("tcp", addr, tlsConfig)
 	} else {
 		ln, err = net.Listen("tcp", addr)
 	}
 	if err != nil {
 		return err
 	}
-	b.cfg.Logger.Info("minipulsar listening", "addr", addr, "tls", b.cfg.TLSConfig != nil)
+	b.cfg.Logger.Info("minipulsar listening", "addr", addr, "tls", tlsConfig != nil)
 
 	for {
 		conn, err := ln.Accept()
