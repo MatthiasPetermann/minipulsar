@@ -1,158 +1,35 @@
-# minipulsar – Edge-ready, minimal Pulsar-compatible broker (PoC)
+# minipulsar
 
-**minipulsar** is a deliberately lean, Apache Pulsar-compatible broker written in Go.
-It is an opinionated implementation that stays intentionally simple and easy to
-reason about.
-It is built for protocol exploration, edge experiments, and lightweight deployments
-where you want Pulsar compatibility without running a full Pulsar cluster.
+**Edge-ready, minimal Pulsar-compatible broker (PoC)**
 
-> **Status:** Proof-of-Concept (PoC). Not production-ready — yet.
+minipulsar is a deliberately lean Apache Pulsar-compatible broker written in Go.
+It focuses on protocol clarity and a small footprint so you can experiment with
+Pulsar semantics on edge devices or constrained environments.
 
----
-
-## Vision: from PoC to a real Edge Broker
-
-The goal is a **real Edge Broker**: small, portable, deterministic — and still
-compatible with the Pulsar protocol. That means:
-
-- **Edge-first:** runs on small hardware, minimal footprint, simple deploys.
-- **Protocol-compatible:** standard Pulsar clients can connect.
-- **Secure-by-design:** authentication and policies already exist today.
-- **TLS support:** transport encryption is available for secure connections.
-
-Why this matters:
-
-- Edge devices need local brokers that **start fast** and are **easy to operate**.
-- Many use cases need the Pulsar protocol **but not** the full Pulsar infrastructure.
-- A lightweight edge gateway can preprocess, buffer, and distribute data locally
-  before it is aggregated centrally.
+> **Status:** Proof-of-Concept (PoC). Not production-ready.
 
 ---
 
-## Why minipulsar exists
+## Highlights
 
-minipulsar serves as a **compact reference implementation** of the Pulsar binary
-protocol — with minimal persistence, authentication, and a small control plane.
-
-We intentionally build **only what’s necessary**, so you can:
-
-- understand the Pulsar protocol **concretely**,
-- run a broker **easily in edge environments**,
-- add features **iteratively** without monolithic dependencies.
-
-Personal motivation: I originally wanted to run Apache Pulsar on NetBSD. While Pulsar is implemented in Java and should run anywhere a JDK exists, in practice native libs bundled in some JARs (e.g., BookKeeper → RocksDB) make non‑mainstream platforms fail. That friction was one of the reasons to dig deeper into the Pulsar stack.
+- **Pulsar protocol compatible** for standard clients.
+- **Edge-first** runtime: small binary, fast start, minimal dependencies.
+- **Persistent + non-persistent topics** with a SQLite-backed log.
+- **JWT auth + HCL policies** for explicit access control.
+- **Prometheus metrics** and optional synthwave TUI dashboard.
 
 ---
 
-## Goals (and deliberate constraints)
+## Quickstart
 
-### Goals
-
-- Understand, test, and implement the Pulsar protocol.
-- A minimal broker for edge deployments.
-- Portable (already runs on NetBSD).
-- JWT-based authentication.
-- Policies as a human-readable DSL (HCL)
-- Pulsar Functions (Lua) for edge transformations.
-
-### Non-goals (for now)
-
-- Full Pulsar feature parity.
-- High availability, multi-cluster, or cluster sharding.
-- Schema registry or broker-side schema validation.
-
----
-
-## Features (intentionally reduced)
-
-- Pulsar binary protocol over TCP (default `:6650`)
-- Persistent and non-persistent topics (`persistent://` / `non-persistent://`)
-- JWT authentication (HS256) with role-based policies
-- Supported commands:
-  - `CONNECT` / `CONNECTED`
-  - `PARTITIONED_METADATA` / `PARTITIONED_METADATA_RESPONSE` (always 0 partitions)
-  - `LOOKUP` / `LOOKUP_RESPONSE` (redirects to itself)
-  - `PRODUCER` / `PRODUCER_SUCCESS`
-  - `SEND` / `SEND_RECEIPT`
-  - `SUBSCRIBE` / `SUCCESS`
-  - `FLOW` / `MESSAGE`
-  - `ACK` (individual ack only)
-  - `PING` / `PONG`
-- Persistence:
-  - SQLite log per topic (`messages`) for persistent topics
-  - Normalized schema (tenant → namespace → topic)
-  - Subscription cursor and pending delivery tables
-  - Shared subscription delivery (round-robin)
-  - Non-persistent topics are memory-only and best-effort (messages drop if no consumer has permits)
-- Messaging control plane (HCL) with Lua functions and bindings
-- Prometheus metrics endpoint
-- Optional synthwave TUI dashboard
-
----
-
-## Roadmap (short-term, deliberately prioritized)
-
-**Short-term goals:**
-
-- ✅ Stabilize the protocol stack
-- ✅ Improve edge ergonomics (smaller, simpler, more reliable)
-- ✅ **TLS support** (transport encryption as a requirement for real edge deployments)
-
-**Why TLS now:**
-
-- Edge systems often communicate over public networks or insecure Wi‑Fi.
-- TLS is the minimum required for confidentiality and integrity.
-- It enables secure client‑to‑broker connections without extra tunnels.
-
-**Security initiative 2 (current workstream):**
-
-- Enforce max message sizes during SEND.
-- Add per-connection read/write timeouts to harden against slow clients.
-- Strengthen SQLite concurrency safety with busy timeouts.
-- Guard shared subscription claims against duplicate delivery.
-- Begin introducing focused tests.
-
----
-
-## Project layout
-
-- `cmd/minipulsar`
-  - CLI entrypoint, flags, logging, config
-- `internal/broker`
-  - Connection lifecycle, protocol handlers, delivery orchestration
-- `internal/storage`
-  - SQLite schema and persistence primitives
-- `internal/protocol`
-  - Pulsar wire framing helpers
-- `pb/PulsarApi.proto`
-  - Pulsar protocol definition (Go types via `protoc`)
-
----
-
-## Requirements
-
-- Go >= 1.21
-- `protoc` + `protoc-gen-go`
-
-Install the Go plugin if needed:
-
-```bash
-go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-export PATH="$PATH:$HOME/go/bin"
-```
-
----
-
-## Build
+### Build
 
 ```bash
 make generate   # generate pb/PulsarApi.pb.go
 make build      # compile ./bin/minipulsar
 ```
 
----
-
-## Run
+### Run
 
 ```bash
 ./bin/minipulsar \
@@ -164,9 +41,7 @@ make build      # compile ./bin/minipulsar
 
 ## TLS (recommended for non-local deployments)
 
-Minipulsar can listen with TLS by providing a certificate and private key.
-
-### Quick self-signed cert (local/dev)
+Create a dev certificate:
 
 ```bash
 openssl req -x509 -newkey rsa:2048 -nodes \
@@ -174,7 +49,7 @@ openssl req -x509 -newkey rsa:2048 -nodes \
   -days 365 -subj "/CN=localhost"
 ```
 
-Run the broker with TLS:
+Run with TLS:
 
 ```bash
 ./bin/minipulsar \
@@ -186,7 +61,7 @@ Run the broker with TLS:
 
 ---
 
-## Quickstart (JWT auth + policies)
+## Authentication & Policies (JWT + HCL)
 
 ```bash
 export MINIPULSAR_JWT_SECRET="dev-secret"
@@ -196,7 +71,7 @@ export MINIPULSAR_JWT_SECRET="dev-secret"
   -messaging-config ./examples/messaging.hcl
 ```
 
-Tiny HS256 JWT script (no external dependencies):
+Generate a tiny HS256 JWT (no external deps):
 
 ```bash
 python - <<'PY'
@@ -216,20 +91,10 @@ print(f"{msg}.{sig}")
 PY
 ```
 
-Set the token as `Authorization: Bearer <token>` in your Pulsar client,
-or pass it in `CONNECT` as `auth_data`.
+Set the token as `Authorization: Bearer <token>` in your Pulsar client or pass it
+in the `CONNECT` command `auth_data` field.
 
----
-
-## Messaging config (HCL)
-
-The messaging control plane config is optional. It can:
-
-- define namespace authorization policies,
-- register Lua functions,
-- bind a source topic through a function into a target topic.
-
-Example:
+### Messaging config example (HCL)
 
 ```hcl
 security {
@@ -253,15 +118,62 @@ binding {
 }
 ```
 
-`max_runtime` is optional per function. When set, the Lua worker aborts execution
-that exceeds the duration (e.g. `250ms`, `2s`). Omitted or empty means unlimited.
+---
 
-### Security modes
+## Features
 
-`mode` controls policy strictness:
+- Pulsar binary protocol over TCP (default `:6650`)
+- Persistent and non-persistent topics
+- JWT authentication (HS256)
+- Supported commands:
+  - `CONNECT` / `CONNECTED`
+  - `PARTITIONED_METADATA` / `PARTITIONED_METADATA_RESPONSE` (always 0 partitions)
+  - `LOOKUP` / `LOOKUP_RESPONSE` (redirects to itself)
+  - `PRODUCER` / `PRODUCER_SUCCESS`
+  - `SEND` / `SEND_RECEIPT`
+  - `SUBSCRIBE` / `SUCCESS`
+  - `FLOW` / `MESSAGE`
+  - `ACK` (individual ack only)
+  - `PING` / `PONG`
+- Persistence:
+  - SQLite log per topic
+  - Subscription cursors + pending delivery tracking
+  - Shared subscription delivery (round-robin)
+- Messaging control plane (HCL) with Lua functions and bindings
+- Prometheus metrics endpoint
+- Optional synthwave TUI dashboard
 
-- `strict`: namespace rules are enforced; without a match, access is denied.
-- `open`: all authorization checks are skipped (local/testing).
+---
+
+## Project layout
+
+- `cmd/minipulsar` – CLI entrypoint, flags, logging, config
+- `internal/broker` – Connection lifecycle, protocol handlers, delivery orchestration
+- `internal/storage` – SQLite schema and persistence primitives
+- `internal/protocol` – Pulsar wire framing helpers
+- `pb/PulsarApi.proto` – Pulsar protocol definition (generated via `protoc`)
+
+---
+
+## Development
+
+### Requirements
+
+- Go >= 1.21
+- `protoc` + `protoc-gen-go`
+
+Install the Go plugin if needed:
+
+```bash
+go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+export PATH="$PATH:$HOME/go/bin"
+```
+
+### Tests
+
+```bash
+go test ./...
+```
 
 ---
 
@@ -291,31 +203,16 @@ that exceeds the duration (e.g. `250ms`, `2s`). Omitted or empty means unlimited
 
 ---
 
-## Protocol flow (typical client session)
-
-1. Client sends `PARTITIONED_METADATA` → broker replies with 0 partitions.
-2. Client sends `LOOKUP` → broker responds pointing to itself.
-3. Client sends `CONNECT` → broker replies with `CONNECTED`.
-4. Client sends `PRODUCER` → broker replies with `PRODUCER_SUCCESS`.
-5. Client sends `SEND` → broker persists payload and replies `SEND_RECEIPT`.
-6. Client sends `SUBSCRIBE` → broker replies with `SUCCESS`.
-7. Client sends `FLOW` → broker delivers messages as `MESSAGE` frames.
-8. Client sends `ACK` → broker removes pending entries for that consumer.
-9. `PING`/`PONG` keepalives.
-
----
-
 ## Notes
 
 This project is for **learning, prototyping, and edge experiments**.
 For production environments, full Apache Pulsar is the right choice.
 
-If you want to help make the **Edge Broker** real:
-issues, feedback, and PRs are welcome.
+If you want to help make the **Edge Broker** real: issues, feedback, and PRs are welcome.
 
 ---
 
 ## Author
 
-minipulsar is an experiment by Matthias Petermann. More background and write‑ups at: https://www.petermann-digital.de/blog/  
-If you need support beyond the open-source scope, feel free to reach out.
+minipulsar is an experiment by Matthias Petermann. More background and write-ups at:
+https://www.petermann-digital.de/blog/
