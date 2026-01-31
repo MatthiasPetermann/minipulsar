@@ -25,7 +25,7 @@ func (b *Broker) handleConnect(conn net.Conn, base *pulsar.BaseCommand) error {
 		return fmt.Errorf("CONNECT without payload")
 	}
 	if b.cfg.Messaging != nil && b.cfg.Messaging.Security != nil {
-		roles, err := rolesFromConnect(cmd)
+		roles, err := rolesFromConnect(cmd, b.cfg.JWTSecret)
 		if err != nil {
 			return fmt.Errorf("parse auth roles: %w", err)
 		}

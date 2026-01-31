@@ -36,6 +36,7 @@ messages.
 
 - Pulsar binary protocol over TCP (default `:6650`)
 - Persistent and non-persistent topics (`persistent://` and `non-persistent://`)
+- JWT authentication (HS256) with role/roles claims for authorization
 - Supported commands:
   - `CONNECT` / `CONNECTED`
   - `PARTITIONED_METADATA` / `PARTITIONED_METADATA_RESPONSE` (always 0 partitions)
@@ -52,10 +53,12 @@ messages.
   - Subscription cursor and pending delivery tables
   - Shared subscription delivery with round-robin consumers
   - Non-persistent topics are kept in memory only (no backlog)
+- Messaging control plane (HCL) with Lua functions and bindings
+- Prometheus metrics endpoint
+- Optional synthwave TUI dashboard
 
 ## Non-features
 
-- Authentication / authorization
 - TLS
 - Partitions (topics are treated as non-partitioned)
 - Schema registry
@@ -102,6 +105,83 @@ make build      # compile cmd/minipulsar into ./bin/minipulsar
   -db ./minipulsar.db
 ```
 
+## Quickstart
+
+Minimal startup with JWT auth (HS256) and messaging policies:
+
+```bash
+export MINIPULSAR_JWT_SECRET="dev-secret"
+./bin/minipulsar \
+  -addr :6650 \
+  -db ./minipulsar.db \
+  -messaging-config ./examples/messaging.hcl
+```
+
+A tiny script (no external dependencies) to mint an HS256 JWT with `role`:
+
+```bash
+python - <<'PY'
+import base64, json, hmac, hashlib, time
+
+secret = b"dev-secret"
+header = {"alg": "HS256", "typ": "JWT"}
+payload = {"role": "tester", "exp": int(time.time()) + 3600}
+
+def b64(obj):
+    raw = json.dumps(obj, separators=(",", ":"), sort_keys=True).encode()
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
+
+msg = f"{b64(header)}.{b64(payload)}"
+sig = base64.urlsafe_b64encode(hmac.new(secret, msg.encode(), hashlib.sha256).digest()).rstrip(b"=").decode()
+print(f"{msg}.{sig}")
+PY
+```
+
+Set the token as `Authorization: Bearer <token>` in the Pulsar client config
+or send it directly as `auth_data` in the CONNECT command.
+
+## Messaging config (HCL)
+
+The messaging control plane config is optional. When provided, it can:
+
+- Define authorization policies for namespaces.
+- Register Lua functions.
+- Bind a source topic through a function into a target topic.
+
+Example:
+
+```hcl
+security {
+  mode = "strict"
+}
+
+namespace "persistent://public/default" {
+  produce = ["tester"]
+  consume = ["tester"]
+}
+
+function "transform" {
+  path = "transform.lua"
+}
+
+binding {
+  source = "persistent://public/default/temperature.f"
+  function = "transform"
+  target = "persistent://public/default/temperature.c"
+}
+```
+
+### Security mode behavior
+
+`mode` controls how strictly namespace policies are enforced:
+
+- `strict`: namespace rules are enforced for produce/consume. If a namespace is
+  not declared, or an action has no matching role, access is denied.
+- `open`: all authorization checks are bypassed. Namespace rules are ignored.
+
+This keeps the model simple: either you enforce explicit allowlists (`strict`)
+or you run in an open mode for local/testing setups (`open`).
+
 ### CLI flags
 
 - `-addr` – listen address for the Pulsar binary protocol
@@ -113,6 +193,14 @@ make build      # compile cmd/minipulsar into ./bin/minipulsar
 - `-log-level` – log level (`trace`, `debug`, `info`, `warn`, `error`)
 - `-log-format` – log format (`text` or `json`)
 - `-log-timestamp` – include timestamps in output (`true`/`false`)
+- `-messaging-config` – path to messaging control-plane HCL config
+- `-function-workers` – number of Lua function workers
+- `-metrics-addr` – listen address for Prometheus metrics endpoint (empty to disable)
+- `-metrics-path` – HTTP path for Prometheus metrics endpoint
+- `-metrics-interval` – interval between metrics collection
+- `-metrics-top-topics` – number of top topics to export metrics for
+- `-jwt-secret` – shared secret for HS256 JWT verification (or set `MINIPULSAR_JWT_SECRET`)
+- `-tui` – enable synthwave TUI dashboard
 
 ## Protocol flow (typical client session)
 

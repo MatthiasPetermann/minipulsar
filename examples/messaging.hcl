@@ -1,6 +1,5 @@
 security {
   mode = "strict"
-  default_policy = "deny"
 }
 
 namespace "persistent://public/default" {
