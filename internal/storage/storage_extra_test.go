@@ -121,6 +121,125 @@ func TestEnsureSubscriptionLatestStartsAfterNewestMessage(t *testing.T) {
 	}
 }
 
+func TestClaimBatchSkipsPendingMessagesAdvancesCursor(t *testing.T) {
+	store := openTestStore(t)
+	topic := "persistent://public/default/pending-skip-test"
+	sub := "sub"
+
+	if err := store.EnsureSubscription(topic, sub, InitialPositionEarliest); err != nil {
+		t.Fatalf("ensure subscription: %v", err)
+	}
+
+	var ids []int64
+	for i := 0; i < 3; i++ {
+		msg := Message{
+			Topic:   topic,
+			Payload: []byte("payload"),
+		}
+		if err := store.InsertMessage(&msg); err != nil {
+			t.Fatalf("insert message: %v", err)
+		}
+		ids = append(ids, msg.ID)
+	}
+
+	batch, err := store.ClaimBatch(topic, sub, 1, 1)
+	if err != nil {
+		t.Fatalf("claim batch: %v", err)
+	}
+	if len(batch) != 1 {
+		t.Fatalf("expected 1 message claimed, got %d", len(batch))
+	}
+
+	var topicID int64
+	if err := store.db.QueryRow(
+		"SELECT id FROM topics WHERE full_name=?",
+		topic,
+	).Scan(&topicID); err != nil {
+		t.Fatalf("lookup topic id: %v", err)
+	}
+
+	if _, err := store.db.Exec(
+		"INSERT INTO subscription_pending(topic_id, name, message_id, consumer_id, delivered_at) VALUES(?,?,?,?,?)",
+		topicID, sub, ids[1], int64(2), time.Now().UnixMilli(),
+	); err != nil {
+		t.Fatalf("insert pending: %v", err)
+	}
+
+	nextBatch, err := store.ClaimBatch(topic, sub, 3, 5)
+	if err != nil {
+		t.Fatalf("claim batch 2: %v", err)
+	}
+	if len(nextBatch) != 1 {
+		t.Fatalf("expected 1 message claimed, got %d", len(nextBatch))
+	}
+	if nextBatch[0].ID != ids[2] {
+		t.Fatalf("expected message %d, got %d", ids[2], nextBatch[0].ID)
+	}
+
+	nextID, err := scanSubscriptionCursor(store.db, sub)
+	if err != nil {
+		t.Fatalf("query cursor: %v", err)
+	}
+	if nextID != ids[2]+1 {
+		t.Fatalf("expected cursor %d, got %d", ids[2]+1, nextID)
+	}
+}
+
+func TestAckIndividualRespectsConsumerID(t *testing.T) {
+	store := openTestStore(t)
+	topic := "persistent://public/default/ack-consumer-test"
+	sub := "sub"
+
+	if err := store.EnsureSubscription(topic, sub, InitialPositionEarliest); err != nil {
+		t.Fatalf("ensure subscription: %v", err)
+	}
+
+	msg := Message{
+		Topic:   topic,
+		Payload: []byte("payload"),
+	}
+	if err := store.InsertMessage(&msg); err != nil {
+		t.Fatalf("insert message: %v", err)
+	}
+
+	batch, err := store.ClaimBatch(topic, sub, 1, 1)
+	if err != nil {
+		t.Fatalf("claim batch: %v", err)
+	}
+	if len(batch) != 1 {
+		t.Fatalf("expected 1 message claimed, got %d", len(batch))
+	}
+
+	if err := store.AckIndividual(topic, sub, 2, []int64{batch[0].ID}); err != nil {
+		t.Fatalf("ack with wrong consumer: %v", err)
+	}
+
+	var pending int
+	if err := store.db.QueryRow(
+		"SELECT COUNT(*) FROM subscription_pending WHERE name=?",
+		sub,
+	).Scan(&pending); err != nil {
+		t.Fatalf("count pending: %v", err)
+	}
+	if pending != 1 {
+		t.Fatalf("expected 1 pending message, got %d", pending)
+	}
+
+	if err := store.AckIndividual(topic, sub, 1, []int64{batch[0].ID}); err != nil {
+		t.Fatalf("ack with correct consumer: %v", err)
+	}
+
+	if err := store.db.QueryRow(
+		"SELECT COUNT(*) FROM subscription_pending WHERE name=?",
+		sub,
+	).Scan(&pending); err != nil {
+		t.Fatalf("count pending after ack: %v", err)
+	}
+	if pending != 0 {
+		t.Fatalf("expected pending cleared, got %d", pending)
+	}
+}
+
 func TestPruneStaleSubscriptions(t *testing.T) {
 	store := openTestStore(t)
 	topic := "persistent://public/default/stale-test"
