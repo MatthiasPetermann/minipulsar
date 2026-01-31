@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"sync"
+	"time"
 
 	"minipulsar/internal/protocol"
 	"minipulsar/internal/storage"
@@ -109,6 +110,7 @@ func (b *Broker) writeCommand(conn net.Conn, cmd *pulsar.BaseCommand) error {
 	mu := b.wmu(conn)
 	mu.Lock()
 	defer mu.Unlock()
+	b.setWriteDeadline(conn)
 	return protocol.WriteSimpleCommand(conn, cmd)
 }
 
@@ -117,5 +119,13 @@ func (b *Broker) writeMsgFrame(conn net.Conn, consumerID uint64, msg storage.Mes
 	mu := b.wmu(conn)
 	mu.Lock()
 	defer mu.Unlock()
+	b.setWriteDeadline(conn)
 	return protocol.WriteMessageFrame(conn, consumerID, msg)
+}
+
+func (b *Broker) setWriteDeadline(conn net.Conn) {
+	if b.cfg.WriteTimeout <= 0 {
+		return
+	}
+	_ = conn.SetWriteDeadline(time.Now().Add(b.cfg.WriteTimeout))
 }

@@ -7,6 +7,7 @@ import (
 	"os"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"minipulsar/internal/logging"
 	"minipulsar/internal/messaging"
@@ -33,6 +34,10 @@ type Config struct {
 	JWTSecret []byte
 	// TLSConfig enables TLS for the broker listener when non-nil.
 	TLSConfig *tls.Config
+	// ReadTimeout caps how long a client can block while sending a frame.
+	ReadTimeout time.Duration
+	// WriteTimeout caps how long the broker can block while writing a frame.
+	WriteTimeout time.Duration
 }
 
 // producerKey scopes producer identifiers by connection to avoid collisions
@@ -142,6 +147,12 @@ func New(store *storage.Store, cfg Config) *Broker {
 	}
 	if cfg.ServerVersion == "" {
 		cfg.ServerVersion = "minipulsar-0.1"
+	}
+	if cfg.ReadTimeout == 0 {
+		cfg.ReadTimeout = 15 * time.Second
+	}
+	if cfg.WriteTimeout == 0 {
+		cfg.WriteTimeout = 15 * time.Second
 	}
 	cfg.Logger = logger
 

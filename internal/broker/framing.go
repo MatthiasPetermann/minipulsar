@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"time"
 
 	"google.golang.org/protobuf/proto"
 
@@ -15,6 +16,9 @@ import (
 // handleFrame reads a length-prefixed Pulsar frame and dispatches the command.
 // It enforces size limits to protect memory consumption.
 func (b *Broker) handleFrame(conn net.Conn) error {
+	if b.cfg.ReadTimeout > 0 {
+		_ = conn.SetReadDeadline(time.Now().Add(b.cfg.ReadTimeout))
+	}
 	var sizeBuf [4]byte
 	if _, err := io.ReadFull(conn, sizeBuf[:]); err != nil {
 		return err

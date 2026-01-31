@@ -38,6 +38,8 @@ func main() {
 	metricsInterval := flag.Duration("metrics-interval", 5*time.Second, "interval between metrics collection")
 	metricsTopTopics := flag.Int("metrics-top-topics", 10, "number of top topics to export metrics for")
 	jwtSecret := flag.String("jwt-secret", os.Getenv("MINIPULSAR_JWT_SECRET"), "shared secret for HS256 JWT verification (or set MINIPULSAR_JWT_SECRET)")
+	readTimeout := flag.Duration("read-timeout", 15*time.Second, "maximum time allowed to read a frame from a client (0 to disable)")
+	writeTimeout := flag.Duration("write-timeout", 15*time.Second, "maximum time allowed to write a frame to a client (0 to disable)")
 	tlsCert := flag.String("tls-cert", "", "path to TLS certificate PEM (enables TLS)")
 	tlsKey := flag.String("tls-key", "", "path to TLS private key PEM (enables TLS)")
 	flag.Parse()
@@ -103,18 +105,10 @@ func main() {
 		}
 		logger = tuiLogger
 
-		var messagingRuntime *messaging.Runtime
-		if messagingCfg != nil {
-			runtime, err := messaging.BuildRuntime(messagingCfg, messaging.Options{
-				Logger:        logger.With("component", "messaging"),
-				WorkerCount:   *functionWorkers,
-				ValidateFuncs: true,
-			})
-			if err != nil {
-				logger.Error("init messaging runtime", "err", err)
-				os.Exit(1)
-			}
-			messagingRuntime = runtime
+		messagingRuntime, err := buildMessagingRuntime(messagingCfg, logger, *functionWorkers)
+		if err != nil {
+			logger.Error("init messaging runtime", "err", err)
+			os.Exit(1)
 		}
 
 		b := broker.New(store, broker.Config{
@@ -126,26 +120,18 @@ func main() {
 			Messaging:        messagingRuntime,
 			JWTSecret:        []byte(strings.TrimSpace(*jwtSecret)),
 			TLSConfig:        tlsConfig,
+			ReadTimeout:      *readTimeout,
+			WriteTimeout:     *writeTimeout,
 		})
-		if *metricsAddr != "" {
-			metricsServer, err := metrics.NewServer(b, metrics.Config{
-				Logger:         logger.With("component", "metrics"),
-				ListenAddr:     *metricsAddr,
-				Path:           *metricsPath,
-				ScrapeInterval: *metricsInterval,
-				TopTopicsLimit: *metricsTopTopics,
-			})
-			if err != nil {
-				logger.Error("init metrics", "err", err)
-				os.Exit(1)
-			}
-			metricsServer.Start()
-			logger.Info("metrics endpoint started",
-				"metrics_addr", *metricsAddr,
-				"metrics_path", *metricsPath,
-				"metrics_interval", metricsInterval.String(),
-				"metrics_top", *metricsTopTopics,
-			)
+		if err := startMetricsServer(b, logger, metrics.Config{
+			Logger:         logger.With("component", "metrics"),
+			ListenAddr:     *metricsAddr,
+			Path:           *metricsPath,
+			ScrapeInterval: *metricsInterval,
+			TopTopicsLimit: *metricsTopTopics,
+		}); err != nil {
+			logger.Error("init metrics", "err", err)
+			os.Exit(1)
 		}
 
 		logger.Info("starting minipulsar",
@@ -157,6 +143,8 @@ func main() {
 			"version", *serverVersion,
 			"messaging", *messagingConfig,
 			"tls_enabled", tlsConfig != nil,
+			"read_timeout", readTimeout.String(),
+			"write_timeout", writeTimeout.String(),
 		)
 
 		program := tui.NewProgram(b, logCh)
@@ -173,18 +161,10 @@ func main() {
 		return
 	}
 
-	var messagingRuntime *messaging.Runtime
-	if messagingCfg != nil {
-		runtime, err := messaging.BuildRuntime(messagingCfg, messaging.Options{
-			Logger:        logger.With("component", "messaging"),
-			WorkerCount:   *functionWorkers,
-			ValidateFuncs: true,
-		})
-		if err != nil {
-			logger.Error("init messaging runtime", "err", err)
-			os.Exit(1)
-		}
-		messagingRuntime = runtime
+	messagingRuntime, err := buildMessagingRuntime(messagingCfg, logger, *functionWorkers)
+	if err != nil {
+		logger.Error("init messaging runtime", "err", err)
+		os.Exit(1)
 	}
 
 	b := broker.New(store, broker.Config{
@@ -196,26 +176,18 @@ func main() {
 		Messaging:        messagingRuntime,
 		JWTSecret:        []byte(strings.TrimSpace(*jwtSecret)),
 		TLSConfig:        tlsConfig,
+		ReadTimeout:      *readTimeout,
+		WriteTimeout:     *writeTimeout,
 	})
-	if *metricsAddr != "" {
-		metricsServer, err := metrics.NewServer(b, metrics.Config{
-			Logger:         logger.With("component", "metrics"),
-			ListenAddr:     *metricsAddr,
-			Path:           *metricsPath,
-			ScrapeInterval: *metricsInterval,
-			TopTopicsLimit: *metricsTopTopics,
-		})
-		if err != nil {
-			logger.Error("init metrics", "err", err)
-			os.Exit(1)
-		}
-		metricsServer.Start()
-		logger.Info("metrics endpoint started",
-			"metrics_addr", *metricsAddr,
-			"metrics_path", *metricsPath,
-			"metrics_interval", metricsInterval.String(),
-			"metrics_top", *metricsTopTopics,
-		)
+	if err := startMetricsServer(b, logger, metrics.Config{
+		Logger:         logger.With("component", "metrics"),
+		ListenAddr:     *metricsAddr,
+		Path:           *metricsPath,
+		ScrapeInterval: *metricsInterval,
+		TopTopicsLimit: *metricsTopTopics,
+	}); err != nil {
+		logger.Error("init metrics", "err", err)
+		os.Exit(1)
 	}
 
 	logger.Info("starting minipulsar",
@@ -227,12 +199,43 @@ func main() {
 		"version", *serverVersion,
 		"messaging", *messagingConfig,
 		"tls_enabled", tlsConfig != nil,
+		"read_timeout", readTimeout.String(),
+		"write_timeout", writeTimeout.String(),
 	)
 
 	if err := b.Serve(*addr); err != nil {
 		logger.Error("listen", "err", err)
 		os.Exit(1)
 	}
+}
+
+func buildMessagingRuntime(cfg *messaging.Config, logger *logging.Logger, workers int) (*messaging.Runtime, error) {
+	if cfg == nil {
+		return nil, nil
+	}
+	return messaging.BuildRuntime(cfg, messaging.Options{
+		Logger:        logger.With("component", "messaging"),
+		WorkerCount:   workers,
+		ValidateFuncs: true,
+	})
+}
+
+func startMetricsServer(b *broker.Broker, logger *logging.Logger, cfg metrics.Config) error {
+	if cfg.ListenAddr == "" {
+		return nil
+	}
+	metricsServer, err := metrics.NewServer(b, cfg)
+	if err != nil {
+		return err
+	}
+	metricsServer.Start()
+	logger.Info("metrics endpoint started",
+		"metrics_addr", cfg.ListenAddr,
+		"metrics_path", cfg.Path,
+		"metrics_interval", cfg.ScrapeInterval.String(),
+		"metrics_top", cfg.TopTopicsLimit,
+	)
+	return nil
 }
 
 func parseLogLevel(raw string) (slog.Level, error) {
