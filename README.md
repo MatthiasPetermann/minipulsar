@@ -29,7 +29,7 @@ make generate   # generate pb/PulsarApi.pb.go
 make build      # compile ./bin/minipulsar
 ```
 
-### Run
+### Run (plain TCP)
 
 ```bash
 ./bin/minipulsar \
@@ -37,23 +37,52 @@ make build      # compile ./bin/minipulsar
   -db ./minipulsar.db
 ```
 
----
+### Run with TLS (plain + TLS listeners)
 
-## TLS (recommended for non-local deployments)
+minipulsar can listen on both the plain Pulsar port (`:6650`) and a TLS port
+(`:6651`) at the same time. The defaults are configurable via `-addr` and
+`-tls-addr`.
 
-Create a dev certificate:
+Create a dev certificate (self-signed):
 
 ```bash
 openssl req -x509 -newkey rsa:2048 -nodes \
-  -keyout server.key -out server.crt \
-  -days 365 -subj "/CN=localhost"
+  -keyout server.key \
+  -out server.crt \
+  -days 365 \
+  -subj "/CN=localhost"
 ```
 
-Run with TLS:
+Run with both listeners enabled:
 
 ```bash
 ./bin/minipulsar \
   -addr :6650 \
+  -tls-addr :6651 \
+  -db ./minipulsar.db \
+  -tls-cert ./server.crt \
+  -tls-key ./server.key
+```
+
+If you only want TLS, disable the plain listener by passing an empty `-addr`:
+
+```bash
+./bin/minipulsar \
+  -addr "" \
+  -tls-addr :6651 \
+  -db ./minipulsar.db \
+  -tls-cert ./server.crt \
+  -tls-key ./server.key
+```
+
+You can also override the advertised broker URLs used in LOOKUP responses:
+
+```bash
+./bin/minipulsar \
+  -addr :6650 \
+  -tls-addr :6651 \
+  -broker-url pulsar://127.0.0.1:6650 \
+  -broker-url-tls pulsar+ssl://127.0.0.1:6651 \
   -db ./minipulsar.db \
   -tls-cert ./server.crt \
   -tls-key ./server.key
@@ -180,8 +209,10 @@ go test ./...
 ## CLI flags (selection)
 
 - `-addr` – listen address for Pulsar protocol
+- `-tls-addr` – listen address for Pulsar TLS protocol
 - `-db` – path to SQLite DB
 - `-broker-url` – broker URL for `LOOKUP`
+- `-broker-url-tls` – broker TLS URL for `LOOKUP` (empty disables)
 - `-server-version` – server version in `CONNECTED`
 - `-max-frame` – max frame size (bytes)
 - `-max-message` – max message size (bytes)
