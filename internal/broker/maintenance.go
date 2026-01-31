@@ -38,6 +38,12 @@ func (b *Broker) runNamespaceMaintenance() {
 		}
 		if policy.Retention > 0 {
 			cutoff := now.Add(-policy.Retention)
+			consumedRemoved, err := b.store.PruneConsumedMessages(namespace, cutoff)
+			if err != nil {
+				b.cfg.Logger.Warn("consumed message retention cleanup failed", "namespace", namespace, "err", err)
+			} else {
+				b.cfg.Logger.Info("consumed message retention cleanup completed", "namespace", namespace, "deleted_messages", consumedRemoved)
+			}
 			removed, err := b.store.PruneOrphanedMessages(namespace, cutoff)
 			if err != nil {
 				b.cfg.Logger.Warn("orphaned message retention cleanup failed", "namespace", namespace, "err", err)

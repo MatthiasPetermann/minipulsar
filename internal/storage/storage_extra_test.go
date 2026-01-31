@@ -188,3 +188,59 @@ func TestPruneOrphanedMessages(t *testing.T) {
 		t.Fatalf("expected messages to be removed, got %d", count)
 	}
 }
+
+func TestPruneConsumedMessages(t *testing.T) {
+	store := openTestStore(t)
+	topic := "persistent://public/default/consumed-retention-test"
+
+	if err := store.EnsureSubscription(topic, "sub", InitialPositionEarliest); err != nil {
+		t.Fatalf("ensure subscription: %v", err)
+	}
+
+	oldTime := time.Now().Add(-2 * time.Hour).UnixMilli()
+	msg1 := Message{
+		Topic:       topic,
+		Payload:     []byte("payload-1"),
+		PublishTime: oldTime,
+	}
+	if err := store.InsertMessage(&msg1); err != nil {
+		t.Fatalf("insert message 1: %v", err)
+	}
+	msg2 := Message{
+		Topic:       topic,
+		Payload:     []byte("payload-2"),
+		PublishTime: oldTime,
+	}
+	if err := store.InsertMessage(&msg2); err != nil {
+		t.Fatalf("insert message 2: %v", err)
+	}
+
+	batch, err := store.ClaimBatch(topic, "sub", 1, 1)
+	if err != nil {
+		t.Fatalf("claim batch: %v", err)
+	}
+	if len(batch) != 1 {
+		t.Fatalf("expected 1 message claimed, got %d", len(batch))
+	}
+	if err := store.AckIndividual(topic, "sub", 1, []int64{batch[0].ID}); err != nil {
+		t.Fatalf("ack message: %v", err)
+	}
+
+	deleted, err := store.PruneConsumedMessages("persistent://public/default", time.Now().Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("prune consumed messages: %v", err)
+	}
+	if deleted != 1 {
+		t.Fatalf("expected 1 message deleted, got %d", deleted)
+	}
+
+	var count int
+	if err := store.db.QueryRow(
+		"SELECT COUNT(*) FROM messages",
+	).Scan(&count); err != nil {
+		t.Fatalf("count messages: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected 1 message to remain, got %d", count)
+	}
+}
