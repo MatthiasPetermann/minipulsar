@@ -47,6 +47,19 @@ type Formatter interface {
 	Format(*Entry) ([]byte, error)
 }
 
+type FieldLogger interface {
+	WithField(key string, value interface{}) *Entry
+	WithFields(fields Fields) *Entry
+	WithError(err error) *Entry
+
+	Trace(msg string)
+	Debug(msg string)
+	Info(msg string)
+	Warn(msg string)
+	Error(msg string)
+	Fatal(msg string)
+}
+
 type TextFormatter struct {
 	FullTimestamp bool
 }
@@ -61,6 +74,12 @@ type Logger struct {
 	out          io.Writer
 	formatter    Formatter
 	reportCaller bool
+}
+
+var standardLogger = New()
+
+func StandardLogger() *Logger {
+	return standardLogger
 }
 
 func New() *Logger {
