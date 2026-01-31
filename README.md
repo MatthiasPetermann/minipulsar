@@ -152,9 +152,11 @@ binding {
 Namespace policies (within a `namespace` block):
 
 - `subscription_timeout_seconds`: delete subscriptions that have not been served by any consumer within the timeout.
+  Defaults to `0`, which disables subscription timeouts.
 - `retention_seconds`: retain messages for this duration. Messages are removed once they are older than
   the retention window and have been consumed by all subscriptions. Topics with no subscriptions are
-  cleaned up based on the same retention window.
+  cleaned up based on the same retention window. Defaults to `0`, which skips persisting messages when
+  there are no subscriptions and removes consumed messages as soon as possible.
 - Empty topic cleanup runs during namespace maintenance and deletes topics with no messages, no subscriptions,
   and no active producers/consumers. Topics referenced by function bindings are preserved.
 
@@ -239,6 +241,7 @@ go test ./...
 - `-metrics-path` – HTTP path
 - `-metrics-interval` – export interval
 - `-metrics-top-topics` – number of top topics in metrics
+- `-namespace-maintenance-interval` – interval between namespace maintenance sweeps
 - `-jwt-secret` – HS256 secret (or set `MINIPULSAR_JWT_SECRET`)
 - `-tui` – enable synthwave TUI
 - `-read-timeout` – maximum duration to read a frame (0 disables)

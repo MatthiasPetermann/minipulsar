@@ -436,6 +436,29 @@ func (s *Store) lookupTopicID(topicName string) (int64, error) {
 	return id, nil
 }
 
+// HasSubscriptions reports whether a topic has at least one subscription.
+func (s *Store) HasSubscriptions(topicName string) (bool, error) {
+	topicID, err := s.lookupTopicID(topicName)
+	if err != nil {
+		return false, err
+	}
+	if topicID == 0 {
+		return false, nil
+	}
+	var exists int
+	err = s.db.QueryRow(
+		"SELECT 1 FROM subscriptions WHERE topic_id=? LIMIT 1",
+		topicID,
+	).Scan(&exists)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func ensureTopic(tx *sql.Tx, info topic.Info) (int64, error) {
 	if !info.Persistent {
 		return 0, fmt.Errorf("non-persistent topic cannot be stored: %s", info.FullName)

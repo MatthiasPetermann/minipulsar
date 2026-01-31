@@ -40,6 +40,8 @@ type Config struct {
 	ReadTimeout time.Duration
 	// WriteTimeout caps how long the broker can block while writing a frame.
 	WriteTimeout time.Duration
+	// NamespaceMaintenanceInterval controls how often namespace maintenance runs.
+	NamespaceMaintenanceInterval time.Duration
 }
 
 // producerKey scopes producer identifiers by connection to avoid collisions
@@ -158,6 +160,9 @@ func New(store *storage.Store, cfg Config) *Broker {
 	}
 	if cfg.WriteTimeout == 0 {
 		cfg.WriteTimeout = 15 * time.Second
+	}
+	if cfg.NamespaceMaintenanceInterval == 0 {
+		cfg.NamespaceMaintenanceInterval = defaultNamespaceMaintenanceInterval
 	}
 	cfg.Logger = logger
 
