@@ -161,7 +161,7 @@ func New(store *storage.Store, cfg Config) *Broker {
 	}
 	cfg.Logger = logger
 
-	return &Broker{
+	b := &Broker{
 		store:            store,
 		cfg:              cfg,
 		producers:        make(map[producerKey]*producer),
@@ -170,6 +170,8 @@ func New(store *storage.Store, cfg Config) *Broker {
 		nonPersistentSeq: make(map[string]uint64),
 		connRoles:        make(map[net.Conn][]string),
 	}
+	b.startNamespaceMaintenance()
+	return b
 }
 
 // nextUID returns a unique consumer UID for tracking pending delivery state.

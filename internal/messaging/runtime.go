@@ -35,11 +35,12 @@ type FunctionRegistry struct {
 
 // Runtime carries the parsed configuration and execution helpers.
 type Runtime struct {
-	Security  *SecurityIR
-	Functions *FunctionRegistry
-	Bindings  map[string][]Binding
-	Pool      *FunctionPool
-	Logger    *logging.Logger
+	Security          *SecurityIR
+	Functions         *FunctionRegistry
+	Bindings          map[string][]Binding
+	NamespacePolicies map[string]NamespacePolicy
+	Pool              *FunctionPool
+	Logger            *logging.Logger
 }
 
 // Options configures runtime creation.
@@ -69,6 +70,31 @@ func BuildRuntime(cfg *Config, opts Options) (*Runtime, error) {
 	securityIR, err := BuildSecurityIR(cfg)
 	if err != nil {
 		return nil, err
+	}
+
+	namespacePolicies := make(map[string]NamespacePolicy)
+	for _, ns := range cfg.Namespaces {
+		if ns.Name == "" {
+			return nil, fmt.Errorf("namespace name is required")
+		}
+		normalized, err := normalizeNamespace(ns.Name)
+		if err != nil {
+			return nil, fmt.Errorf("namespace %q: %w", ns.Name, err)
+		}
+		policy := NamespacePolicy{}
+		if ns.SubscriptionTimeoutSeconds < 0 {
+			return nil, fmt.Errorf("namespace %q subscription_timeout_seconds must be >= 0", ns.Name)
+		}
+		if ns.SubscriptionTimeoutSeconds > 0 {
+			policy.SubscriptionTimeout = time.Duration(ns.SubscriptionTimeoutSeconds) * time.Second
+		}
+		if ns.RetentionSeconds < 0 {
+			return nil, fmt.Errorf("namespace %q retention_seconds must be >= 0", ns.Name)
+		}
+		if ns.RetentionSeconds > 0 {
+			policy.Retention = time.Duration(ns.RetentionSeconds) * time.Second
+		}
+		namespacePolicies[normalized] = policy
 	}
 
 	registry := &FunctionRegistry{Functions: make(map[string]FunctionSpec)}
@@ -143,11 +169,12 @@ func BuildRuntime(cfg *Config, opts Options) (*Runtime, error) {
 	}
 
 	runtime := &Runtime{
-		Security:  securityIR,
-		Functions: registry,
-		Bindings:  bindings,
-		Pool:      pool,
-		Logger:    logger,
+		Security:          securityIR,
+		Functions:         registry,
+		Bindings:          bindings,
+		NamespacePolicies: namespacePolicies,
+		Pool:              pool,
+		Logger:            logger,
 	}
 
 	if opts.ValidateFuncs {
@@ -157,6 +184,26 @@ func BuildRuntime(cfg *Config, opts Options) (*Runtime, error) {
 	}
 
 	return runtime, nil
+}
+
+// NamespacePolicy stores retention and subscription behavior for a namespace.
+type NamespacePolicy struct {
+	SubscriptionTimeout time.Duration
+	Retention           time.Duration
+}
+
+// PolicyForTopic returns the namespace policy for a topic, if configured.
+func (r *Runtime) PolicyForTopic(info topic.Info) (NamespacePolicy, bool) {
+	if r == nil || len(r.NamespacePolicies) == 0 {
+		return NamespacePolicy{}, false
+	}
+	scheme := "persistent"
+	if !info.Persistent {
+		scheme = "non-persistent"
+	}
+	key := fmt.Sprintf("%s://%s/%s", scheme, info.Tenant, info.Namespace)
+	policy, ok := r.NamespacePolicies[key]
+	return policy, ok
 }
 
 // BindingsFor returns bindings for a source topic.
