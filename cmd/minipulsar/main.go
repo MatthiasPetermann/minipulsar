@@ -36,6 +36,7 @@ func main() {
 	metricsPath := flag.String("metrics-path", "/metrics", "HTTP path for Prometheus metrics endpoint")
 	metricsInterval := flag.Duration("metrics-interval", 5*time.Second, "interval between metrics collection")
 	metricsTopTopics := flag.Int("metrics-top-topics", 10, "number of top topics to export metrics for")
+	jwtSecret := flag.String("jwt-secret", os.Getenv("MINIPULSAR_JWT_SECRET"), "shared secret for HS256 JWT verification (or set MINIPULSAR_JWT_SECRET)")
 	flag.Parse()
 
 	logger := logrus.New()
@@ -92,6 +93,7 @@ func main() {
 		BrokerServiceURL: *brokerURL,
 		ServerVersion:    *serverVersion,
 		Messaging:        messagingRuntime,
+		JWTSecret:        []byte(strings.TrimSpace(*jwtSecret)),
 	})
 
 	if *metricsAddr != "" {

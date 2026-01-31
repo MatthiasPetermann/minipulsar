@@ -27,6 +27,8 @@ type Config struct {
 	ServerVersion string
 	// Messaging configures optional messaging control-plane runtime behavior.
 	Messaging *messaging.Runtime
+	// JWTSecret is the shared secret used to verify HS256 JWTs from clients.
+	JWTSecret []byte
 }
 
 // producerKey scopes producer identifiers by connection to avoid collisions
