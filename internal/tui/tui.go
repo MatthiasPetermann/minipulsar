@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"log/slog"
 	"math"
 	"strings"
 	"time"
@@ -33,6 +34,7 @@ type tickMsg time.Time
 type model struct {
 	broker *broker.Broker
 	logCh  <-chan string
+	level  *slog.LevelVar
 
 	width   int
 	height  int
@@ -45,13 +47,16 @@ type model struct {
 
 	viewport viewport.Model
 	logs     []string
+	logLevel slog.Level
 }
 
 // NewProgram builds a Bubble Tea program that renders broker stats and logs.
-func NewProgram(b *broker.Broker, logCh <-chan string) *tea.Program {
+func NewProgram(b *broker.Broker, logCh <-chan string, levelVar *slog.LevelVar, level slog.Level) *tea.Program {
 	m := model{
-		broker: b,
-		logCh:  logCh,
+		broker:   b,
+		logCh:    logCh,
+		level:    levelVar,
+		logLevel: level,
 	}
 	return tea.NewProgram(m, tea.WithAltScreen())
 }
@@ -108,6 +113,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
+		case "l":
+			m.rotateLogLevel()
 		case "up", "k":
 			m.viewport.LineUp(1)
 		case "down", "j":
@@ -198,7 +205,7 @@ func (m model) View() string {
 	topics := styles.box.Width(m.layout.topicsWidth).Height(m.layout.topHeight).Render(renderTopTopics(m.stats, m.layout.topicsWidth-2))
 	row := lipgloss.JoinHorizontal(lipgloss.Top, stats, " ", topics)
 	logs := styles.box.Width(m.layout.totalWidth - 2).Height(m.layout.logHeight).Render(m.viewport.View())
-	help := styles.help.Render("q: quit • ↑/↓/pgup/pgdown scroll logs")
+	help := styles.help.Render(fmt.Sprintf("q: quit • l: log level (%s) • ↑/↓/pgup/pgdown scroll logs", logLevelLabel(m.logLevel)))
 
 	content := lipgloss.JoinVertical(lipgloss.Left, header, row, logs, help)
 	return lipgloss.NewStyle().Padding(m.padding, m.padding).Render(content)
@@ -348,4 +355,53 @@ func formatBytes(value uint64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %cB", float64(value)/float64(div), "KMGTPE"[exp])
+}
+
+func (m *model) rotateLogLevel() {
+	if m.level == nil {
+		return
+	}
+	levels := []slog.Level{slog.LevelDebug, slog.LevelInfo, slog.LevelWarn, slog.LevelError}
+	current := normalizeLevel(m.logLevel)
+	next := levels[0]
+	for i, lvl := range levels {
+		if current == lvl {
+			next = levels[(i+1)%len(levels)]
+			break
+		}
+	}
+	m.logLevel = next
+	m.level.Set(next)
+}
+
+func normalizeLevel(level slog.Level) slog.Level {
+	if level <= slog.LevelDebug {
+		return slog.LevelDebug
+	}
+	if level >= slog.LevelError {
+		return slog.LevelError
+	}
+	switch level {
+	case slog.LevelInfo:
+		return slog.LevelInfo
+	case slog.LevelWarn:
+		return slog.LevelWarn
+	default:
+		return slog.LevelInfo
+	}
+}
+
+func logLevelLabel(level slog.Level) string {
+	switch normalizeLevel(level) {
+	case slog.LevelDebug:
+		return "DEBUG"
+	case slog.LevelInfo:
+		return "INFO"
+	case slog.LevelWarn:
+		return "WARN"
+	case slog.LevelError:
+		return "ERROR"
+	default:
+		return "INFO"
+	}
 }

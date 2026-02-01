@@ -94,10 +94,13 @@ func main() {
 
 	if *enableTUI {
 		logCh := make(chan string, 500)
+		logLevelVar := &slog.LevelVar{}
+		logLevelVar.Set(level)
 		tuiLogger, err := logging.New(logging.Options{
 			Format:        *logFormat,
 			WithTimestamp: *logTimestamp,
-			Level:         level,
+			LevelVar:      logLevelVar,
+			TimeFormat:    "15:04:05.000",
 			Writer: tui.NewLogWriter(func(line string) {
 				select {
 				case logCh <- line:
@@ -158,7 +161,7 @@ func main() {
 			"namespace_maintenance_interval", namespaceMaintenanceInterval.String(),
 		)
 
-		program := tui.NewProgram(b, logCh)
+		program := tui.NewProgram(b, logCh, logLevelVar, level)
 		errCh, err := startBrokerListeners(b, logger, *addr, *tlsAddr, tlsConfig)
 		if err != nil {
 			tuiLogger.Error("listen", "err", err)
