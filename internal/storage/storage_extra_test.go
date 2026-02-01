@@ -8,7 +8,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-func openTestStore(t *testing.T) *Store {
+func openExtraTestStore(t *testing.T) *Store {
 	t.Helper()
 	store, err := Open(filepath.Join(t.TempDir(), "minipulsar.db"))
 	if err != nil {
@@ -21,7 +21,7 @@ func openTestStore(t *testing.T) *Store {
 }
 
 func TestEnsureSubscriptionCreatesCursor(t *testing.T) {
-	store := openTestStore(t)
+	store := openExtraTestStore(t)
 
 	topic := "persistent://public/default/test"
 	if err := store.EnsureSubscription(topic, "sub", InitialPositionEarliest); err != nil {
@@ -37,19 +37,8 @@ func TestEnsureSubscriptionCreatesCursor(t *testing.T) {
 	}
 }
 
-func TestInsertMessageRejectsNonPersistent(t *testing.T) {
-	store := openTestStore(t)
-	msg := Message{
-		Topic:   "non-persistent://public/default/test",
-		Payload: []byte("payload"),
-	}
-	if err := store.InsertMessage(&msg); err == nil {
-		t.Fatalf("expected error for non-persistent topic")
-	}
-}
-
 func TestClaimBatchAdvancesCursorAndAckClearsPending(t *testing.T) {
-	store := openTestStore(t)
+	store := openExtraTestStore(t)
 	topic := "persistent://public/default/test"
 
 	for i := 0; i < 2; i++ {
@@ -95,7 +84,7 @@ func TestClaimBatchAdvancesCursorAndAckClearsPending(t *testing.T) {
 }
 
 func TestEnsureSubscriptionLatestStartsAfterNewestMessage(t *testing.T) {
-	store := openTestStore(t)
+	store := openExtraTestStore(t)
 	topic := "persistent://public/default/latest-test"
 
 	for i := 0; i < 2; i++ {
@@ -122,7 +111,7 @@ func TestEnsureSubscriptionLatestStartsAfterNewestMessage(t *testing.T) {
 }
 
 func TestClaimBatchSkipsPendingMessagesAdvancesCursor(t *testing.T) {
-	store := openTestStore(t)
+	store := openExtraTestStore(t)
 	topic := "persistent://public/default/pending-skip-test"
 	sub := "sub"
 
@@ -186,7 +175,7 @@ func TestClaimBatchSkipsPendingMessagesAdvancesCursor(t *testing.T) {
 }
 
 func TestAckIndividualRespectsConsumerID(t *testing.T) {
-	store := openTestStore(t)
+	store := openExtraTestStore(t)
 	topic := "persistent://public/default/ack-consumer-test"
 	sub := "sub"
 
@@ -241,7 +230,7 @@ func TestAckIndividualRespectsConsumerID(t *testing.T) {
 }
 
 func TestPruneStaleSubscriptions(t *testing.T) {
-	store := openTestStore(t)
+	store := openExtraTestStore(t)
 	topic := "persistent://public/default/stale-test"
 
 	if err := store.EnsureSubscription(topic, "sub", InitialPositionEarliest); err != nil {
@@ -276,7 +265,7 @@ func TestPruneStaleSubscriptions(t *testing.T) {
 }
 
 func TestPruneOrphanedMessages(t *testing.T) {
-	store := openTestStore(t)
+	store := openExtraTestStore(t)
 	topic := "persistent://public/default/retention-test"
 
 	oldTime := time.Now().Add(-2 * time.Hour).UnixMilli()
@@ -309,7 +298,7 @@ func TestPruneOrphanedMessages(t *testing.T) {
 }
 
 func TestPruneConsumedMessages(t *testing.T) {
-	store := openTestStore(t)
+	store := openExtraTestStore(t)
 	topic := "persistent://public/default/consumed-retention-test"
 
 	if err := store.EnsureSubscription(topic, "sub", InitialPositionEarliest); err != nil {
