@@ -11,7 +11,8 @@ import (
 // Logger is a lightweight wrapper that standardizes logging across service and TUI modes.
 // It delegates to slog while allowing the output to be swapped based on runtime mode.
 type Logger struct {
-	base *slog.Logger
+	base     *slog.Logger
+	levelVar *slog.LevelVar
 }
 
 // Options configures the logger output and formatting.
@@ -19,6 +20,8 @@ type Options struct {
 	Format        string
 	WithTimestamp bool
 	Level         slog.Level
+	LevelVar      *slog.LevelVar
+	TimeFormat    string
 	Writer        io.Writer
 }
 
@@ -31,10 +34,18 @@ func New(opts Options) (*Logger, error) {
 	handlerOpts := &slog.HandlerOptions{
 		Level: opts.Level,
 	}
-	if !opts.WithTimestamp {
+	if opts.LevelVar != nil {
+		handlerOpts.Level = opts.LevelVar
+	}
+	if !opts.WithTimestamp || opts.TimeFormat != "" {
 		handlerOpts.ReplaceAttr = func(_ []string, attr slog.Attr) slog.Attr {
 			if attr.Key == slog.TimeKey {
-				return slog.Attr{}
+				if !opts.WithTimestamp {
+					return slog.Attr{}
+				}
+				if opts.TimeFormat != "" {
+					return slog.String(slog.TimeKey, attr.Value.Time().Format(opts.TimeFormat))
+				}
 			}
 			return attr
 		}
@@ -50,7 +61,7 @@ func New(opts Options) (*Logger, error) {
 		return nil, fmt.Errorf("invalid log-format %q (expected text or json)", opts.Format)
 	}
 
-	return &Logger{base: slog.New(handler)}, nil
+	return &Logger{base: slog.New(handler), levelVar: opts.LevelVar}, nil
 }
 
 // With returns a logger with additional key/value context.
@@ -91,4 +102,12 @@ func (l *Logger) Error(msg string, args ...any) {
 		return
 	}
 	l.base.Error(msg, args...)
+}
+
+// SetLevel updates the logger's minimum log level when configured with a LevelVar.
+func (l *Logger) SetLevel(level slog.Level) {
+	if l == nil || l.levelVar == nil {
+		return
+	}
+	l.levelVar.Set(level)
 }
