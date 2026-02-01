@@ -91,7 +91,11 @@ func (b *Broker) cleanupConnection(conn net.Conn) {
 
 	for _, k := range producerKeys {
 		b.mu.Lock()
+		p := b.producers[k]
 		delete(b.producers, k)
+		if p != nil {
+			b.signalProducerWaitersLocked(p.topic)
+		}
 		b.mu.Unlock()
 	}
 

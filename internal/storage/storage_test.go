@@ -31,7 +31,7 @@ func TestEnsureSubscriptionInitialPositionLatest(t *testing.T) {
 	if err := store.InsertMessage(msg); err != nil {
 		t.Fatalf("insert message: %v", err)
 	}
-	if err := store.EnsureSubscription(msg.Topic, "sub-a", InitialPositionLatest); err != nil {
+	if err := store.EnsureSubscription(msg.Topic, "sub-a", InitialPositionLatest, SubscriptionTypeShared); err != nil {
 		t.Fatalf("ensure subscription: %v", err)
 	}
 
@@ -51,7 +51,7 @@ func TestEnsureSubscriptionInitialPositionEarliest(t *testing.T) {
 	// Pulsar subscriptions created at "earliest" should start from the first entry id,
 	// so the cursor is initialized to 1 even if the topic is currently empty.
 	store := openTestStore(t)
-	if err := store.EnsureSubscription("persistent://public/default/audit", "sub-b", InitialPositionEarliest); err != nil {
+	if err := store.EnsureSubscription("persistent://public/default/audit", "sub-b", InitialPositionEarliest, SubscriptionTypeShared); err != nil {
 		t.Fatalf("ensure subscription: %v", err)
 	}
 
@@ -86,7 +86,7 @@ func TestClaimBatchAndAckIndividual(t *testing.T) {
 	store := openTestStore(t)
 	topicName := "persistent://public/default/orders"
 
-	if err := store.EnsureSubscription(topicName, "sub", InitialPositionEarliest); err != nil {
+	if err := store.EnsureSubscription(topicName, "sub", InitialPositionEarliest, SubscriptionTypeShared); err != nil {
 		t.Fatalf("ensure subscription: %v", err)
 	}
 	for i := 0; i < 3; i++ {
@@ -135,7 +135,7 @@ func TestDropPendingByConsumer(t *testing.T) {
 	// so we ensure the storage layer removes the backlog for a specific consumer.
 	store := openTestStore(t)
 	topicName := "persistent://public/default/metrics"
-	if err := store.EnsureSubscription(topicName, "sub", InitialPositionEarliest); err != nil {
+	if err := store.EnsureSubscription(topicName, "sub", InitialPositionEarliest, SubscriptionTypeShared); err != nil {
 		t.Fatalf("ensure subscription: %v", err)
 	}
 	if err := store.InsertMessage(&Message{Topic: topicName, Payload: []byte("a")}); err != nil {
@@ -172,7 +172,7 @@ func TestHasSubscriptions(t *testing.T) {
 		t.Fatalf("unexpected subscriptions before creation")
 	}
 
-	if err := store.EnsureSubscription(topicName, "sub", InitialPositionEarliest); err != nil {
+	if err := store.EnsureSubscription(topicName, "sub", InitialPositionEarliest, SubscriptionTypeShared); err != nil {
 		t.Fatalf("ensure subscription: %v", err)
 	}
 	has, err = store.HasSubscriptions(topicName)
@@ -189,7 +189,7 @@ func TestStatsSnapshot(t *testing.T) {
 	// so the storage stats snapshot should aggregate those values correctly.
 	store := openTestStore(t)
 	topicName := "persistent://public/default/stats"
-	if err := store.EnsureSubscription(topicName, "sub", InitialPositionEarliest); err != nil {
+	if err := store.EnsureSubscription(topicName, "sub", InitialPositionEarliest, SubscriptionTypeShared); err != nil {
 		t.Fatalf("ensure subscription: %v", err)
 	}
 	if err := store.InsertMessage(&Message{Topic: topicName, Payload: []byte("a")}); err != nil {

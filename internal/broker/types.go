@@ -12,6 +12,7 @@ import (
 	"minipulsar/internal/logging"
 	"minipulsar/internal/messaging"
 	"minipulsar/internal/storage"
+	pulsar "minipulsar/pb"
 )
 
 // Config controls broker runtime behavior and logging.
@@ -67,6 +68,8 @@ type Broker struct {
 	// producers/consumers are keyed by (conn, id) to avoid collisions across connections.
 	producers map[producerKey]*producer
 	consumers map[consumerKey]*consumer
+	// producerConds coordinates wait-for-exclusive producers per topic.
+	producerConds map[string]*sync.Cond
 
 	// subscription states keyed by (topic, subscription).
 	subs map[subKey]*subState
@@ -98,6 +101,7 @@ type producer struct {
 	topic      string
 	persistent bool
 	conn       net.Conn
+	accessMode pulsar.ProducerAccessMode
 }
 
 // consumer represents a Pulsar consumer that receives messages for a subscription.
@@ -109,6 +113,8 @@ type consumer struct {
 	subscription string
 	persistent   bool
 	conn         net.Conn
+	subType      pulsar.CommandSubscribe_SubType
+	priority     int
 
 	mu      sync.Mutex
 	permits int
@@ -125,6 +131,7 @@ type subState struct {
 	key subKey
 
 	persistent bool
+	subType    pulsar.CommandSubscribe_SubType
 	mu         sync.Mutex
 	consumers  []*consumer
 	rr         int
@@ -176,6 +183,7 @@ func New(store *storage.Store, cfg Config) *Broker {
 		cfg:              cfg,
 		producers:        make(map[producerKey]*producer),
 		consumers:        make(map[consumerKey]*consumer),
+		producerConds:    make(map[string]*sync.Cond),
 		subs:             make(map[subKey]*subState),
 		nonPersistentSeq: make(map[string]uint64),
 		connRoles:        make(map[net.Conn][]string),

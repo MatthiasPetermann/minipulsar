@@ -120,15 +120,35 @@ func (b *Broker) handleProducer(conn net.Conn, base *pulsar.BaseCommand) error {
 	if name == "" {
 		name = fmt.Sprintf("minipulsar-producer-%d", producerID)
 	}
+	accessMode := cmd.GetProducerAccessMode()
 
 	key := producerKey{conn: conn, id: producerID}
 
 	b.mu.Lock()
+	switch accessMode {
+	case pulsar.ProducerAccessMode_Shared:
+	case pulsar.ProducerAccessMode_Exclusive:
+		if b.topicHasProducersLocked(topicInfo.FullName) {
+			b.mu.Unlock()
+			return fmt.Errorf("exclusive producer already connected for %s", topicInfo.FullName)
+		}
+	case pulsar.ProducerAccessMode_WaitForExclusive:
+		cond := b.getProducerCondLocked(topicInfo.FullName)
+		for b.topicHasProducersLocked(topicInfo.FullName) {
+			cond.Wait()
+		}
+	case pulsar.ProducerAccessMode_ExclusiveWithFencing:
+		b.fenceProducersLocked(topicInfo.FullName)
+	default:
+		b.mu.Unlock()
+		return fmt.Errorf("unsupported producer access mode %s", accessMode)
+	}
 	b.producers[key] = &producer{
 		id:         producerID,
 		topic:      topicInfo.FullName,
 		persistent: topicInfo.Persistent,
 		conn:       conn,
+		accessMode: accessMode,
 	}
 	b.mu.Unlock()
 
@@ -136,6 +156,7 @@ func (b *Broker) handleProducer(conn net.Conn, base *pulsar.BaseCommand) error {
 		"producer_id", producerID,
 		"topic", topicInfo.FullName,
 		"name", name,
+		"access_mode", accessMode.String(),
 	)
 
 	resp := &pulsar.BaseCommand{
@@ -169,12 +190,18 @@ func (b *Broker) handleSubscribe(conn net.Conn, base *pulsar.BaseCommand) error 
 		return err
 	}
 
+	subType := cmd.GetSubType()
+	storageType, err := subscriptionTypeForStorage(subType)
+	if err != nil {
+		return err
+	}
+
 	if topicInfo.Persistent {
 		position := storage.InitialPositionLatest
 		if cmd.InitialPosition != nil && cmd.GetInitialPosition() == pulsar.CommandSubscribe_Earliest {
 			position = storage.InitialPositionEarliest
 		}
-		if err := b.store.EnsureSubscription(topicInfo.FullName, sub, position); err != nil {
+		if err := b.store.EnsureSubscription(topicInfo.FullName, sub, position, storageType); err != nil {
 			return fmt.Errorf("ensure subscription: %w", err)
 		}
 	}
@@ -186,6 +213,8 @@ func (b *Broker) handleSubscribe(conn net.Conn, base *pulsar.BaseCommand) error 
 		subscription: sub,
 		persistent:   topicInfo.Persistent,
 		conn:         conn,
+		subType:      subType,
+		priority:     int(cmd.GetPriorityLevel()),
 	}
 
 	key := consumerKey{conn: conn, id: consumerID}
@@ -201,8 +230,15 @@ func (b *Broker) handleSubscribe(conn net.Conn, base *pulsar.BaseCommand) error 
 	b.mu.Unlock()
 
 	// Attach to subscription state.
-	s := b.getOrCreateSubState(topicInfo.FullName, sub, topicInfo.Persistent)
+	s, err := b.getOrCreateSubState(topicInfo.FullName, sub, topicInfo.Persistent, subType)
+	if err != nil {
+		return err
+	}
 	s.mu.Lock()
+	if subType == pulsar.CommandSubscribe_Exclusive && len(s.consumers) > 0 {
+		s.mu.Unlock()
+		return fmt.Errorf("exclusive subscription already has a consumer")
+	}
 	s.consumers = append(s.consumers, c)
 	s.mu.Unlock()
 
@@ -211,6 +247,8 @@ func (b *Broker) handleSubscribe(conn net.Conn, base *pulsar.BaseCommand) error 
 		"consumer_uid", c.uid,
 		"topic", topicInfo.FullName,
 		"subscription", sub,
+		"sub_type", subType.String(),
+		"priority", c.priority,
 	)
 
 	resp := &pulsar.BaseCommand{
@@ -438,7 +476,10 @@ func (b *Broker) handleFlow(conn net.Conn, base *pulsar.BaseCommand) error {
 
 	// Start / wake subscription delivery.
 	if c.persistent {
-		s := b.getOrCreateSubState(c.topic, c.subscription, true)
+		s, err := b.getOrCreateSubState(c.topic, c.subscription, true, c.subType)
+		if err != nil {
+			return err
+		}
 		b.maybeStartSubDelivery(s)
 	}
 	return nil
@@ -505,7 +546,10 @@ func (b *Broker) handleAck(conn net.Conn, base *pulsar.BaseCommand) error {
 	}
 
 	// Try delivering more if permits allow.
-	s := b.getOrCreateSubState(topic, sub, true)
+	s, err := b.getOrCreateSubState(topic, sub, true, c.subType)
+	if err != nil {
+		return err
+	}
 	b.maybeStartSubDelivery(s)
 	return nil
 }
@@ -531,7 +575,11 @@ func (b *Broker) handleCloseProducer(conn net.Conn, base *pulsar.BaseCommand) er
 	b.cfg.Logger.Info("CLOSE_PRODUCER", "producer_id", cmd.GetProducerId())
 
 	b.mu.Lock()
+	p := b.producers[key]
 	delete(b.producers, key)
+	if p != nil {
+		b.signalProducerWaitersLocked(p.topic)
+	}
 	b.mu.Unlock()
 
 	resp := &pulsar.BaseCommand{

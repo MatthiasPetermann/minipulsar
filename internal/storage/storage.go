@@ -33,6 +33,15 @@ const (
 	InitialPositionEarliest
 )
 
+// SubscriptionType describes how a subscription delivers messages to consumers.
+type SubscriptionType string
+
+const (
+	SubscriptionTypeExclusive SubscriptionType = "exclusive"
+	SubscriptionTypeShared    SubscriptionType = "shared"
+	SubscriptionTypeFailover  SubscriptionType = "failover"
+)
+
 // Open creates a new Store backed by the provided SQLite database path.
 // The caller must call InitSchema before serving traffic.
 func Open(path string) (*Store, error) {
@@ -135,7 +144,7 @@ CREATE INDEX IF NOT EXISTS idx_topics_by_namespace
 
 // EnsureSubscription ensures the subscription exists and has an initialized cursor.
 // This matches Pulsar's semantics where subscriptions are created on demand.
-func (s *Store) EnsureSubscription(topicName, name string, position SubscriptionInitialPosition) error {
+func (s *Store) EnsureSubscription(topicName, name string, position SubscriptionInitialPosition, subType SubscriptionType) error {
 	info, err := topic.Parse(topicName)
 	if err != nil {
 		return err
@@ -156,15 +165,18 @@ func (s *Store) EnsureSubscription(topicName, name string, position Subscription
 	}
 
 	now := time.Now().UnixMilli()
-	var exists int
+	var existingType string
 	err = tx.QueryRow(
-		"SELECT 1 FROM subscriptions WHERE topic_id=? AND name=?",
+		"SELECT type FROM subscriptions WHERE topic_id=? AND name=?",
 		topicID, name,
-	).Scan(&exists)
+	).Scan(&existingType)
 	if err != nil && err != sql.ErrNoRows {
 		return err
 	}
 	if err == sql.ErrNoRows {
+		if subType == "" {
+			subType = SubscriptionTypeShared
+		}
 		nextID := int64(1)
 		if position == InitialPositionLatest {
 			var maxID int64
@@ -177,8 +189,8 @@ func (s *Store) EnsureSubscription(topicName, name string, position Subscription
 			nextID = maxID + 1
 		}
 		if _, err := tx.Exec(
-			"INSERT INTO subscriptions(topic_id, name, type, created_at, last_consumer_at) VALUES(?, ?, 'shared', ?, ?)",
-			topicID, name, now, now,
+			"INSERT INTO subscriptions(topic_id, name, type, created_at, last_consumer_at) VALUES(?, ?, ?, ?, ?)",
+			topicID, name, string(subType), now, now,
 		); err != nil {
 			return err
 		}
@@ -189,6 +201,9 @@ func (s *Store) EnsureSubscription(topicName, name string, position Subscription
 			return err
 		}
 	} else {
+		if subType != "" && existingType != string(subType) {
+			return fmt.Errorf("subscription %s type mismatch: existing %s requested %s", name, existingType, subType)
+		}
 		if _, err := tx.Exec(
 			"UPDATE subscriptions SET last_consumer_at=? WHERE topic_id=? AND name=?",
 			now, topicID, name,

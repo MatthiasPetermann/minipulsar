@@ -24,7 +24,7 @@ func TestEnsureSubscriptionCreatesCursor(t *testing.T) {
 	store := openExtraTestStore(t)
 
 	topic := "persistent://public/default/test"
-	if err := store.EnsureSubscription(topic, "sub", InitialPositionEarliest); err != nil {
+	if err := store.EnsureSubscription(topic, "sub", InitialPositionEarliest, SubscriptionTypeShared); err != nil {
 		t.Fatalf("ensure subscription: %v", err)
 	}
 
@@ -97,7 +97,7 @@ func TestEnsureSubscriptionLatestStartsAfterNewestMessage(t *testing.T) {
 		}
 	}
 
-	if err := store.EnsureSubscription(topic, "sub", InitialPositionLatest); err != nil {
+	if err := store.EnsureSubscription(topic, "sub", InitialPositionLatest, SubscriptionTypeShared); err != nil {
 		t.Fatalf("ensure subscription: %v", err)
 	}
 
@@ -115,7 +115,7 @@ func TestClaimBatchSkipsPendingMessagesAdvancesCursor(t *testing.T) {
 	topic := "persistent://public/default/pending-skip-test"
 	sub := "sub"
 
-	if err := store.EnsureSubscription(topic, sub, InitialPositionEarliest); err != nil {
+	if err := store.EnsureSubscription(topic, sub, InitialPositionEarliest, SubscriptionTypeShared); err != nil {
 		t.Fatalf("ensure subscription: %v", err)
 	}
 
@@ -179,7 +179,7 @@ func TestAckIndividualRespectsConsumerID(t *testing.T) {
 	topic := "persistent://public/default/ack-consumer-test"
 	sub := "sub"
 
-	if err := store.EnsureSubscription(topic, sub, InitialPositionEarliest); err != nil {
+	if err := store.EnsureSubscription(topic, sub, InitialPositionEarliest, SubscriptionTypeShared); err != nil {
 		t.Fatalf("ensure subscription: %v", err)
 	}
 
@@ -233,7 +233,7 @@ func TestPruneStaleSubscriptions(t *testing.T) {
 	store := openExtraTestStore(t)
 	topic := "persistent://public/default/stale-test"
 
-	if err := store.EnsureSubscription(topic, "sub", InitialPositionEarliest); err != nil {
+	if err := store.EnsureSubscription(topic, "sub", InitialPositionEarliest, SubscriptionTypeShared); err != nil {
 		t.Fatalf("ensure subscription: %v", err)
 	}
 
@@ -301,7 +301,7 @@ func TestPruneConsumedMessages(t *testing.T) {
 	store := openExtraTestStore(t)
 	topic := "persistent://public/default/consumed-retention-test"
 
-	if err := store.EnsureSubscription(topic, "sub", InitialPositionEarliest); err != nil {
+	if err := store.EnsureSubscription(topic, "sub", InitialPositionEarliest, SubscriptionTypeShared); err != nil {
 		t.Fatalf("ensure subscription: %v", err)
 	}
 
