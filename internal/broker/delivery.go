@@ -1,5 +1,9 @@
 package broker
 
+import (
+	pulsar "minipulsar/pb"
+)
+
 // kickTopic triggers delivery for all subscriptions on a topic.
 // It is invoked after message persistence so subscribers receive new data promptly.
 func (b *Broker) kickTopic(topic string) {
@@ -32,18 +36,7 @@ func (b *Broker) maybeStartSubDelivery(s *subState) {
 		return
 	}
 
-	// any consumer with permits?
-	ready := false
-	for _, c := range s.consumers {
-		c.mu.Lock()
-		p := c.permits
-		c.mu.Unlock()
-		if p > 0 {
-			ready = true
-			break
-		}
-	}
-	if !ready {
+	if s.readyConsumer() == nil {
 		s.mu.Unlock()
 		return
 	}
@@ -51,7 +44,7 @@ func (b *Broker) maybeStartSubDelivery(s *subState) {
 	s.delivering = true
 	s.mu.Unlock()
 
-	go b.deliveryLoopShared(s)
+	go b.deliveryLoop(s)
 }
 
 // nextConsumerWithPermits selects the next consumer eligible to receive messages.
@@ -75,9 +68,9 @@ func (s *subState) nextConsumerWithPermits() *consumer {
 	return nil
 }
 
-// deliveryLoopShared repeatedly claims messages and sends them to consumers.
+// deliveryLoop repeatedly claims messages and sends them to consumers.
 // It respects permits and updates the pending set to avoid duplicate delivery.
-func (b *Broker) deliveryLoopShared(s *subState) {
+func (b *Broker) deliveryLoop(s *subState) {
 	defer func() {
 		s.mu.Lock()
 		s.delivering = false
@@ -87,9 +80,8 @@ func (b *Broker) deliveryLoopShared(s *subState) {
 	const maxBatch = 200
 
 	for {
-		// pick consumer with permits
 		s.mu.Lock()
-		c := s.nextConsumerWithPermits()
+		c := s.selectConsumerWithPermits()
 		s.mu.Unlock()
 		if c == nil {
 			return
@@ -135,4 +127,76 @@ func (b *Broker) deliveryLoopShared(s *subState) {
 			c.mu.Unlock()
 		}
 	}
+}
+
+func (s *subState) readyConsumer() *consumer {
+	switch s.subType {
+	case pulsar.CommandSubscribe_Shared:
+		for _, c := range s.consumers {
+			c.mu.Lock()
+			p := c.permits
+			c.mu.Unlock()
+			if p > 0 {
+				return c
+			}
+		}
+		return nil
+	case pulsar.CommandSubscribe_Exclusive:
+		return s.firstConsumerWithPermits()
+	case pulsar.CommandSubscribe_Failover:
+		return s.primaryConsumerWithPermits()
+	default:
+		return nil
+	}
+}
+
+func (s *subState) selectConsumerWithPermits() *consumer {
+	switch s.subType {
+	case pulsar.CommandSubscribe_Shared:
+		return s.nextConsumerWithPermits()
+	case pulsar.CommandSubscribe_Exclusive:
+		return s.firstConsumerWithPermits()
+	case pulsar.CommandSubscribe_Failover:
+		return s.primaryConsumerWithPermits()
+	default:
+		return nil
+	}
+}
+
+func (s *subState) firstConsumerWithPermits() *consumer {
+	if len(s.consumers) == 0 {
+		return nil
+	}
+	c := s.consumers[0]
+	c.mu.Lock()
+	p := c.permits
+	c.mu.Unlock()
+	if p > 0 {
+		return c
+	}
+	return nil
+}
+
+func (s *subState) primaryConsumerWithPermits() *consumer {
+	if len(s.consumers) == 0 {
+		return nil
+	}
+	var best *consumer
+	bestPriority := 0
+	for _, c := range s.consumers {
+		if best == nil || c.priority > bestPriority {
+			best = c
+			bestPriority = c.priority
+		}
+	}
+	if best == nil {
+		return nil
+	}
+	best.mu.Lock()
+	p := best.permits
+	best.mu.Unlock()
+	if p > 0 {
+		return best
+	}
+	return nil
 }

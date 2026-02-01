@@ -51,7 +51,7 @@ func TestStatsSnapshotUsesStoreStats(t *testing.T) {
 	b.consumers[consumerKey{id: 1}] = &consumer{id: 1}
 	b.mu.Unlock()
 
-	if err := store.EnsureSubscription("persistent://public/default/demo", "sub", storage.InitialPositionEarliest); err != nil {
+	if err := store.EnsureSubscription("persistent://public/default/demo", "sub", storage.InitialPositionEarliest, storage.SubscriptionTypeShared); err != nil {
 		t.Fatalf("ensure subscription: %v", err)
 	}
 	if err := store.InsertMessage(&storage.Message{

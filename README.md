@@ -182,7 +182,8 @@ Subscription start positions are driven by the Pulsar `SUBSCRIBE` command (`init
 - Persistence:
   - SQLite log per topic
   - Subscription cursors + pending delivery tracking
-  - Shared subscription delivery (round-robin)
+  - Subscription delivery types: Exclusive, Shared (round-robin), Failover (priority)
+- Producer access modes: Shared, Exclusive, WaitForExclusive, ExclusiveWithFencing
 - Messaging control plane (HCL) with Lua functions and bindings
 - Namespace policies for subscription timeouts and orphaned message retention
 - Prometheus metrics endpoint
