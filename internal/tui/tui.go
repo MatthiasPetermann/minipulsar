@@ -268,6 +268,8 @@ func renderOverview(stats broker.StatsSnapshot, err error) string {
 		fmt.Sprintf("%s %s", styles.label.Render("Topics"), styles.value.Render(fmt.Sprintf("%d", stats.Topics))),
 		fmt.Sprintf("%s %s", styles.label.Render("Subscriptions"), styles.value.Render(fmt.Sprintf("%d", stats.Subscriptions))),
 		fmt.Sprintf("%s %s", styles.label.Render("Pending"), styles.value.Render(fmt.Sprintf("%d", stats.Pending))),
+		fmt.Sprintf("%s %s", styles.label.Render("Alloc Mem"), styles.value.Render(formatBytes(stats.MemoryAlloc))),
+		fmt.Sprintf("%s %s", styles.label.Render("Msgs/sec"), styles.value.Render(fmt.Sprintf("%.1f", stats.ThroughputPS))),
 	}
 	if err != nil {
 		lines = append(lines, "", styles.label.Render("Stats error: ")+err.Error())
@@ -333,4 +335,17 @@ func truncate(s string, width int) string {
 		return s[:width]
 	}
 	return s[:width-1] + "…"
+}
+
+func formatBytes(value uint64) string {
+	const unit = 1024
+	if value < unit {
+		return fmt.Sprintf("%d B", value)
+	}
+	div, exp := uint64(unit), 0
+	for n := value / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(value)/float64(div), "KMGTPE"[exp])
 }
