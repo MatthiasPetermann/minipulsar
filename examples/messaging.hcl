@@ -5,8 +5,8 @@ security {
 namespace "persistent://public/default" {
   produce = ["tester"]
   consume = ["tester"]
-  subscription_timeout_seconds = 3600
-  retention_seconds = 300
+  subscription_timeout_seconds = 30
+  retention_seconds = 10
 }
 
 function "transform" {

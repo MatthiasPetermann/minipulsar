@@ -165,7 +165,7 @@ func (m *model) resize() {
 		statsWidth = usableWidth - topicsWidth - 3
 	}
 
-	m.viewport = viewport.New(usableWidth-2, logHeight-2)
+	m.viewport = viewport.New(usableWidth-2, logHeight)
 	m.viewport.SetContent(strings.Join(m.logs, "\n"))
 	m.viewport.GotoBottom()
 	m.layout = layout{
@@ -173,7 +173,7 @@ func (m *model) resize() {
 		logHeight:    logHeight,
 		statsWidth:   statsWidth,
 		topicsWidth:  topicsWidth,
-		totalWidth:   usableWidth+2,
+		totalWidth:   usableWidth + 2,
 		headerHeight: headerHeight,
 	}
 }
@@ -197,7 +197,7 @@ func (m model) View() string {
 	stats := styles.box.Width(m.layout.statsWidth).Height(m.layout.topHeight).Render(renderOverview(m.stats, m.err))
 	topics := styles.box.Width(m.layout.topicsWidth).Height(m.layout.topHeight).Render(renderTopTopics(m.stats, m.layout.topicsWidth-2))
 	row := lipgloss.JoinHorizontal(lipgloss.Top, stats, " ", topics)
-	logs := styles.box.Width(m.layout.totalWidth-2).Height(m.layout.logHeight).Render(m.viewport.View())
+	logs := styles.box.Width(m.layout.totalWidth - 2).Height(m.layout.logHeight).Render(m.viewport.View())
 	help := styles.help.Render("q: quit • ↑/↓/pgup/pgdown scroll logs")
 
 	content := lipgloss.JoinVertical(lipgloss.Left, header, row, logs, help)
