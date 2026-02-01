@@ -13,6 +13,8 @@ import (
 )
 
 func TestWriteSimpleCommand(t *testing.T) {
+	// Pulsar frames begin with a 4-byte length prefix followed by command metadata,
+	// so we verify the prefix math and that the command type survives round-trip encoding.
 	cmd := &pulsar.BaseCommand{
 		Type: pulsar.BaseCommand_PING.Enum(),
 	}
@@ -49,6 +51,8 @@ func TestWriteSimpleCommand(t *testing.T) {
 }
 
 func TestWriteMessageFrame(t *testing.T) {
+	// Pulsar message frames include a command header, magic value, checksum, and metadata,
+	// so we validate each component to match the protocol's framing expectations.
 	msg := storage.Message{
 		ID:          42,
 		Topic:       "persistent://public/default/demo",
