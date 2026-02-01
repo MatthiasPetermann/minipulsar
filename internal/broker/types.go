@@ -84,6 +84,11 @@ type Broker struct {
 
 	// connRoles caches roles extracted from CONNECT authentication payloads.
 	connRoles map[net.Conn][]string
+
+	messageCounter    atomic.Int64
+	throughputMu      sync.Mutex
+	lastThroughputAt  time.Time
+	lastThroughputCnt int64
 }
 
 // producer represents a logical producer created by a client connection.

@@ -314,6 +314,8 @@ func (b *Broker) handleSend(conn net.Conn, base *pulsar.BaseCommand, payloadSect
 		b.deliverNonPersistent(p.topic, msg)
 	}
 
+	b.recordMessage()
+
 	b.cfg.Logger.Info("SEND",
 		"topic", p.topic,
 		"producer_id", producerID,
