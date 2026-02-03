@@ -34,6 +34,7 @@ The server emits gauges for:
 - Known namespaces, topics, subscriptions.
 - Stored messages and pending delivery counts.
 - Per-topic message and pending counts (top topics only).
+- Per-subscription backlog counts (top subscriptions only).
 - Last scrape timestamp and duration.
 
 ### Configuration

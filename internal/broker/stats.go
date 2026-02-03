@@ -75,11 +75,9 @@ func (b *Broker) backlogStats(limit int) ([]storage.SubscriptionBacklogStat, err
 	if limit <= 0 {
 		limit = 10
 	}
-	now := time.Now()
 	var subs []storage.SubscriptionBacklogStat
-	for namespace, policy := range b.cfg.Messaging.NamespacePolicies {
-		cutoff := now.Add(-policy.Retention)
-		nsSubs, err := b.store.SubscriptionBacklogStats(namespace, cutoff, limit)
+	for namespace := range b.cfg.Messaging.NamespacePolicies {
+		nsSubs, err := b.store.SubscriptionBacklogStats(namespace, limit)
 		if err != nil {
 			return nil, err
 		}

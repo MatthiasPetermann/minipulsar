@@ -206,7 +206,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 		})
 	}
 
-	writeGaugeHeader(w, "minipulsar_storage_subscription_backlog_messages", "Retention-delayed backlog messages per subscription (top subscriptions only).")
+	writeGaugeHeader(w, "minipulsar_storage_subscription_backlog_messages", "Undelivered backlog messages per subscription (top subscriptions only).")
 	for _, sub := range snap.TopSubscriptionsBacklog {
 		writeGaugeWithLabels(w, "minipulsar_storage_subscription_backlog_messages", float64(sub.BacklogCount), map[string]string{
 			"topic":        sub.Topic,

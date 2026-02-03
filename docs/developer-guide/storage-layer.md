@@ -81,3 +81,6 @@ Namespace-level maintenance is handled in `internal/storage/cleanup.go`:
 `StatsSnapshot` aggregates counts for namespaces, topics, messages,
 subscriptions, and pending rows. It also computes “top topics” by pending
 messages for metrics and the TUI dashboard.
+
+The metrics subsystem separately reports subscription backlog as the count of
+undelivered messages per subscription (derived from subscription cursors).
