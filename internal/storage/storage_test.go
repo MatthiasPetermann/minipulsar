@@ -132,7 +132,8 @@ func TestClaimBatchAndAckIndividual(t *testing.T) {
 
 func TestDropPendingByConsumer(t *testing.T) {
 	// Pulsar brokers clear pending entries when a consumer disconnects,
-	// so we ensure the storage layer removes the backlog for a specific consumer.
+	// so we ensure the storage layer removes the backlog for a specific consumer
+	// and allows redelivery after the pending entries are cleared.
 	store := openTestStore(t)
 	topicName := "persistent://public/default/metrics"
 	if err := store.EnsureSubscription(topicName, "sub", InitialPositionEarliest, SubscriptionTypeShared); err != nil {
@@ -156,6 +157,14 @@ func TestDropPendingByConsumer(t *testing.T) {
 	}
 	if pendingCount != 0 {
 		t.Fatalf("unexpected pending count: %d", pendingCount)
+	}
+
+	redelivered, err := store.ClaimBatch(topicName, "sub", 56, 1)
+	if err != nil {
+		t.Fatalf("claim batch after drop: %v", err)
+	}
+	if len(redelivered) != 1 {
+		t.Fatalf("expected redelivery after drop, got %d messages", len(redelivered))
 	}
 }
 
