@@ -48,6 +48,9 @@ type model struct {
 	viewport viewport.Model
 	logs     []string
 	logLevel slog.Level
+
+	delayLevel int
+	paused     bool
 }
 
 // NewProgram builds a Bubble Tea program that renders broker stats and logs.
@@ -57,7 +60,9 @@ func NewProgram(b *broker.Broker, logCh <-chan string, levelVar *slog.LevelVar, 
 		logCh:    logCh,
 		level:    levelVar,
 		logLevel: level,
+		paused:   b.ThrottlePaused(),
 	}
+	m.delayLevel = b.ThrottleLevel()
 	return tea.NewProgram(m, tea.WithAltScreen())
 }
 
@@ -115,6 +120,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case "l":
 			m.rotateLogLevel()
+		case "d":
+			m.rotateDelayLevel()
+		case " ":
+			m.togglePause()
 		case "up", "k":
 			m.viewport.LineUp(1)
 		case "down", "j":
@@ -205,7 +214,12 @@ func (m model) View() string {
 	topics := styles.box.Width(m.layout.topicsWidth).Height(m.layout.topHeight).Render(renderTopTopics(m.stats, m.layout.topicsWidth-2))
 	row := lipgloss.JoinHorizontal(lipgloss.Top, stats, " ", topics)
 	logs := styles.box.Width(m.layout.totalWidth - 2).Height(m.layout.logHeight).Render(m.viewport.View())
-	help := styles.help.Render(fmt.Sprintf("q: quit • l: log level (%s) • ↑/↓/pgup/pgdown scroll logs", logLevelLabel(m.logLevel)))
+	help := styles.help.Render(fmt.Sprintf(
+		"q: quit • l: log level (%s) • d: delay (%ds) • space: pause (%s) • ↑/↓/pgup/pgdown scroll logs",
+		logLevelLabel(m.logLevel),
+		m.delayLevel,
+		pauseLabel(m.paused),
+	))
 
 	content := lipgloss.JoinVertical(lipgloss.Left, header, row, logs, help)
 	return lipgloss.NewStyle().Padding(m.padding, m.padding).Render(content)
@@ -404,4 +418,24 @@ func logLevelLabel(level slog.Level) string {
 	default:
 		return "INFO"
 	}
+}
+
+func (m *model) rotateDelayLevel() {
+	next := m.delayLevel + 1
+	if next > broker.MaxThrottleLevel {
+		next = 0
+	}
+	m.delayLevel = m.broker.SetThrottleLevel(next)
+}
+
+func (m *model) togglePause() {
+	m.paused = !m.paused
+	m.broker.SetThrottlePaused(m.paused)
+}
+
+func pauseLabel(paused bool) string {
+	if paused {
+		return "on"
+	}
+	return "off"
 }

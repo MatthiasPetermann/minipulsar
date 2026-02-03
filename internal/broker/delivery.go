@@ -113,6 +113,7 @@ func (b *Broker) deliveryLoop(s *subState) {
 		}
 
 		for _, m := range msgs {
+			b.waitForThrottle()
 			// send (write serialized per conn)
 			if err := b.writeMsgFrame(c.conn, c.id, m); err != nil {
 				b.cfg.Logger.Warn("deliver write error", "err", err, "consumer_id", c.id)

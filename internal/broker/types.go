@@ -92,6 +92,9 @@ type Broker struct {
 	throughputMu      sync.Mutex
 	lastThroughputAt  time.Time
 	lastThroughputCnt int64
+
+	throttleDelay  atomic.Int64
+	throttlePaused atomic.Bool
 }
 
 // producer represents a logical producer created by a client connection.
