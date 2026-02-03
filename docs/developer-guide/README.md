@@ -12,8 +12,9 @@ system, so you can reason about behavior, extend it, or debug it effectively.
 4. [Protocol framing](./protocol-framing.md)
 5. [Storage layer](./storage-layer.md)
 6. [Messaging control plane (HCL + Lua)](./messaging-control-plane.md)
-7. [Observability & operator UX](./observability-ux.md)
-8. [Development workflow](./development-workflow.md)
+7. [Messaging flow specification (end-to-end)](./messaging-flow-spec.md)
+8. [Observability & operator UX](./observability-ux.md)
+9. [Development workflow](./development-workflow.md)
 
 ## How to use this guide
 
