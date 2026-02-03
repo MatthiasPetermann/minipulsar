@@ -45,14 +45,15 @@ type Server struct {
 }
 
 type metricsSnapshot struct {
-	Producers     int
-	Consumers     int
-	Namespaces    int
-	Topics        int
-	Subscriptions int
-	Pending       int
-	Messages      int
-	TopTopics     []storage.TopicStat
+	Producers               int
+	Consumers               int
+	Namespaces              int
+	Topics                  int
+	Subscriptions           int
+	Pending                 int
+	Messages                int
+	TopTopics               []storage.TopicStat
+	TopSubscriptionsBacklog []storage.SubscriptionBacklogStat
 
 	ScrapeErrors uint64
 	ScrapeTime   time.Time
@@ -155,20 +156,23 @@ func (s *Server) collectOnce() {
 
 	top := make([]storage.TopicStat, len(stats.TopTopics))
 	copy(top, stats.TopTopics)
+	subBacklog := make([]storage.SubscriptionBacklogStat, len(stats.TopSubscriptionsBacklog))
+	copy(subBacklog, stats.TopSubscriptionsBacklog)
 
 	s.mu.Lock()
 	s.snapshot = metricsSnapshot{
-		Producers:     stats.Producers,
-		Consumers:     stats.Consumers,
-		Namespaces:    stats.Namespaces,
-		Topics:        stats.Topics,
-		Subscriptions: stats.Subscriptions,
-		Pending:       stats.Pending,
-		Messages:      stats.Messages,
-		TopTopics:     top,
-		ScrapeErrors:  s.snapshot.ScrapeErrors,
-		ScrapeTime:    time.Now(),
-		ScrapeCost:    time.Since(start),
+		Producers:               stats.Producers,
+		Consumers:               stats.Consumers,
+		Namespaces:              stats.Namespaces,
+		Topics:                  stats.Topics,
+		Subscriptions:           stats.Subscriptions,
+		Pending:                 stats.Pending,
+		Messages:                stats.Messages,
+		TopTopics:               top,
+		TopSubscriptionsBacklog: subBacklog,
+		ScrapeErrors:            s.snapshot.ScrapeErrors,
+		ScrapeTime:              time.Now(),
+		ScrapeCost:              time.Since(start),
 	}
 	s.mu.Unlock()
 }
@@ -185,7 +189,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 	writeGauge(w, "minipulsar_storage_namespaces", "Number of namespaces known to storage.", snap.Namespaces)
 	writeGauge(w, "minipulsar_storage_topics", "Number of topics known to storage.", snap.Topics)
 	writeGauge(w, "minipulsar_storage_subscriptions", "Number of subscriptions known to storage.", snap.Subscriptions)
-	writeGauge(w, "minipulsar_storage_pending_messages", "Pending (backlog) messages across subscriptions.", snap.Pending)
+	writeGauge(w, "minipulsar_storage_pending_messages", "Pending (delivered, unacked) messages across subscriptions.", snap.Pending)
 	writeGauge(w, "minipulsar_storage_stored_messages", "Stored messages across topics.", snap.Messages)
 
 	writeGaugeHeader(w, "minipulsar_storage_topic_messages", "Stored messages per topic (top topics only).")
@@ -195,10 +199,25 @@ func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 		})
 	}
 
-	writeGaugeHeader(w, "minipulsar_storage_topic_pending_messages", "Pending (backlog) messages per topic (top topics only).")
+	writeGaugeHeader(w, "minipulsar_storage_topic_pending_messages", "Pending (delivered, unacked) messages per topic (top topics only).")
 	for _, topic := range snap.TopTopics {
 		writeGaugeWithLabels(w, "minipulsar_storage_topic_pending_messages", float64(topic.PendingCount), map[string]string{
 			"topic": topic.Topic,
+		})
+	}
+
+	writeGaugeHeader(w, "minipulsar_storage_topic_backlog_messages", "Retention-delayed backlog messages per topic (top topics only).")
+	for _, topic := range snap.TopTopics {
+		writeGaugeWithLabels(w, "minipulsar_storage_topic_backlog_messages", float64(topic.BacklogCount), map[string]string{
+			"topic": topic.Topic,
+		})
+	}
+
+	writeGaugeHeader(w, "minipulsar_storage_subscription_backlog_messages", "Retention-delayed backlog messages per subscription (top subscriptions only).")
+	for _, sub := range snap.TopSubscriptionsBacklog {
+		writeGaugeWithLabels(w, "minipulsar_storage_subscription_backlog_messages", float64(sub.BacklogCount), map[string]string{
+			"topic":        sub.Topic,
+			"subscription": sub.Subscription,
 		})
 	}
 
