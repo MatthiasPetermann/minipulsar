@@ -26,6 +26,7 @@ func (b *Broker) startNamespaceMaintenance() {
 func (b *Broker) runNamespaceMaintenance() {
 	now := time.Now()
 	for namespace, policy := range b.cfg.Messaging.NamespacePolicies {
+		b.touchActiveSubscriptions(namespace)
 		if policy.SubscriptionTimeout > 0 {
 			cutoff := now.Add(-policy.SubscriptionTimeout)
 			dropped, err := b.store.PruneStaleSubscriptions(namespace, cutoff)
@@ -57,6 +58,54 @@ func (b *Broker) runNamespaceMaintenance() {
 			b.cfg.Logger.Info("empty topic cleanup completed", "namespace", namespace, "deleted_topics", deleted)
 		}
 	}
+}
+
+func (b *Broker) touchActiveSubscriptions(namespace string) {
+	subs := b.activeSubscriptionsForNamespace(namespace)
+	if len(subs) == 0 {
+		return
+	}
+	if err := b.store.TouchSubscriptions(namespace, subs); err != nil {
+		b.cfg.Logger.Warn("refresh subscription activity failed", "namespace", namespace, "err", err)
+	}
+}
+
+func (b *Broker) activeSubscriptionsForNamespace(namespace string) []storage.SubscriptionRef {
+	info, err := topic.Parse(namespace + "/__validate")
+	if err != nil {
+		return nil
+	}
+	active := make([]storage.SubscriptionRef, 0)
+	addIfMatch := func(topicName, subscription string) {
+		topicInfo, err := topic.Parse(topicName)
+		if err != nil {
+			return
+		}
+		if topicInfo.Persistent != info.Persistent {
+			return
+		}
+		if topicInfo.Tenant != info.Tenant || topicInfo.Namespace != info.Namespace {
+			return
+		}
+		active = append(active, storage.SubscriptionRef{
+			Topic:        topicInfo.FullName,
+			Subscription: subscription,
+		})
+	}
+
+	b.mu.RLock()
+	for key, state := range b.subs {
+		state.mu.Lock()
+		hasConsumers := len(state.consumers) > 0
+		state.mu.Unlock()
+		if !hasConsumers {
+			continue
+		}
+		addIfMatch(key.topic, key.name)
+	}
+	b.mu.RUnlock()
+
+	return active
 }
 
 func (b *Broker) dropSubscriptionStates(dropped []storage.DroppedSubscription) {

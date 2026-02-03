@@ -1,10 +1,19 @@
 package storage
 
+import "minipulsar/internal/topic"
+
 // TopicStat captures message and pending counts for a topic.
 type TopicStat struct {
 	Topic        string
 	MessageCount int
 	PendingCount int
+}
+
+// SubscriptionBacklogStat captures undelivered backlog per subscription.
+type SubscriptionBacklogStat struct {
+	Topic        string
+	Subscription string
+	BacklogCount int
 }
 
 // StatsSnapshot aggregates storage-backed broker stats.
@@ -17,7 +26,7 @@ type StatsSnapshot struct {
 	TopTopics     []TopicStat
 }
 
-// StatsSnapshot returns high-level storage stats plus top topics by backlog.
+// StatsSnapshot returns high-level storage stats plus top topics by pending messages.
 func (s *Store) StatsSnapshot(limit int) (StatsSnapshot, error) {
 	if limit <= 0 {
 		limit = 10
@@ -92,4 +101,52 @@ func (s *Store) StatsSnapshot(limit int) (StatsSnapshot, error) {
 		Pending:       pending,
 		TopTopics:     top,
 	}, nil
+}
+
+// SubscriptionBacklogStats returns undelivered backlog counts per subscription.
+func (s *Store) SubscriptionBacklogStats(namespace string, limit int) ([]SubscriptionBacklogStat, error) {
+	info, err := topic.Parse(namespace + "/__validate")
+	if err != nil {
+		return nil, err
+	}
+	if !info.Persistent {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 10
+	}
+	rows, err := s.db.Query(
+		`SELECT t.full_name,
+			s.name,
+			COUNT(m.id) AS backlog_count
+		 FROM subscriptions s
+		 JOIN topics t ON t.id = s.topic_id
+		 JOIN namespaces n ON n.id = t.namespace_id
+		 JOIN subscription_cursor c ON c.topic_id = s.topic_id AND c.name = s.name
+		 LEFT JOIN messages m ON m.topic_id = t.id AND m.id >= c.next_message_id
+		 WHERE n.tenant = ? AND n.name = ?
+		 GROUP BY t.full_name, s.name
+		 ORDER BY backlog_count DESC, t.full_name, s.name
+		 LIMIT ?`,
+		info.Tenant,
+		info.Namespace,
+		limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var stats []SubscriptionBacklogStat
+	for rows.Next() {
+		var stat SubscriptionBacklogStat
+		if err := rows.Scan(&stat.Topic, &stat.Subscription, &stat.BacklogCount); err != nil {
+			return nil, err
+		}
+		stats = append(stats, stat)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return stats, nil
 }

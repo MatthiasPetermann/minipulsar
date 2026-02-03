@@ -32,8 +32,9 @@ The server emits gauges for:
 
 - Connected producers and consumers.
 - Known namespaces, topics, subscriptions.
-- Stored messages and pending backlog.
+- Stored messages and pending delivery counts.
 - Per-topic message and pending counts (top topics only).
+- Per-subscription backlog counts (top subscriptions only).
 - Last scrape timestamp and duration.
 
 ### Configuration
@@ -45,8 +46,8 @@ The CLI flags `-metrics-addr`, `-metrics-path`, `-metrics-interval`, and
 
 The optional TUI (`internal/tui`) uses Bubble Tea and Lip Gloss to render:
 
-- Overview stats (producer/consumer counts, backlog, etc.).
-- Top topics by backlog with a bar chart.
+- Overview stats (producer/consumer counts, pending, etc.).
+- Top topics by pending messages.
 - Streaming logs collected from the logging subsystem.
 
 The TUI is enabled with the `-tui` flag. Log lines are routed into the TUI using

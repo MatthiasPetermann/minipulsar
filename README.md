@@ -189,6 +189,11 @@ Subscription start positions are driven by the Pulsar `SUBSCRIBE` command (`init
 - Prometheus metrics endpoint
 - Optional synthwave TUI dashboard
 
+### Observability notes
+
+- The TUI "Top Topics" view shows total stored messages (`msgs`) and delivered-but-unacked messages (`pending`) per topic.
+- Subscription backlog is tracked as undelivered messages per subscription and is exposed via Prometheus metrics.
+
 ---
 
 ## Project layout

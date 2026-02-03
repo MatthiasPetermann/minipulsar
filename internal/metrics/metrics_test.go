@@ -43,6 +43,9 @@ func TestHandleMetricsWritesSnapshot(t *testing.T) {
 			TopTopics: []storage.TopicStat{
 				{Topic: "persistent://public/default/demo", MessageCount: 6, PendingCount: 5},
 			},
+			TopSubscriptionsBacklog: []storage.SubscriptionBacklogStat{
+				{Topic: "persistent://public/default/demo", Subscription: "sub", BacklogCount: 2},
+			},
 			ScrapeErrors: 1,
 			ScrapeTime:   time.Unix(1700000000, 0),
 			ScrapeCost:   125 * time.Millisecond,
@@ -56,6 +59,9 @@ func TestHandleMetricsWritesSnapshot(t *testing.T) {
 	}
 	if !strings.Contains(body, `minipulsar_storage_topic_messages{topic="persistent://public/default/demo"} 6.000000`) {
 		t.Fatalf("missing topic gauge: %s", body)
+	}
+	if !strings.Contains(body, `minipulsar_storage_subscription_backlog_messages{subscription="sub",topic="persistent://public/default/demo"} 2.000000`) {
+		t.Fatalf("missing subscription backlog gauge: %s", body)
 	}
 	if !strings.Contains(body, "minipulsar_metrics_scrape_errors_total 1") {
 		t.Fatalf("missing scrape errors counter: %s", body)

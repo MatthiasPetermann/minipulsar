@@ -307,41 +307,24 @@ func renderTopTopics(stats broker.StatsSnapshot, width int) string {
 		return strings.Join(lines, "\n")
 	}
 
-	maxPending := 0
-	for _, topic := range stats.TopTopics {
-		if topic.PendingCount > maxPending {
-			maxPending = topic.PendingCount
-		}
-	}
-	if maxPending == 0 {
-		maxPending = 1
-	}
-
-	barWidth := int(math.Max(10, math.Min(24, float64(width/3))))
 	metricWidth := 6
-	topicWidth := width - barWidth - metricWidth*2 - 3
+	topicWidth := width - metricWidth*2 - 2
 	if topicWidth < 10 {
 		topicWidth = 10
 	}
 
-	head := fmt.Sprintf("%-*s %*s %*s %s", topicWidth, "Topic", metricWidth, "Msgs", metricWidth, "Pend", "Backlog")
+	head := fmt.Sprintf("%-*s %*s %*s", topicWidth, "Topic", metricWidth, "Msgs", metricWidth, "Pend")
 	lines = append(lines, styles.label.Render(head))
 
 	for _, topic := range stats.TopTopics {
-		barCount := int(math.Round(float64(topic.PendingCount) / float64(maxPending) * float64(barWidth)))
-		if barCount == 0 && topic.PendingCount > 0 {
-			barCount = 1
-		}
-		bar := styles.bar.Render(strings.Repeat("█", barCount))
 		lines = append(lines, fmt.Sprintf(
-			"%-*s %*d %*d %s",
+			"%-*s %*d %*d",
 			topicWidth,
 			truncate(topic.Topic, topicWidth),
 			metricWidth,
 			topic.MessageCount,
 			metricWidth,
 			topic.PendingCount,
-			bar,
 		))
 	}
 
