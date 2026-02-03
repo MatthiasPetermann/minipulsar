@@ -11,7 +11,6 @@ type TopicStat struct {
 	Topic        string
 	MessageCount int
 	PendingCount int
-	BacklogCount int
 }
 
 // SubscriptionBacklogStat captures retention-delayed backlog per subscription.
@@ -69,8 +68,7 @@ func (s *Store) StatsSnapshot(limit int) (StatsSnapshot, error) {
 	rows, err := s.db.Query(
 		`SELECT t.full_name,
 			COALESCE(m.message_count, 0) AS message_count,
-			COALESCE(p.pending_count, 0) AS pending_count,
-			0 AS backlog_count
+			COALESCE(p.pending_count, 0) AS pending_count
 		 FROM topics t
 		 LEFT JOIN (
 			SELECT topic_id, COUNT(*) AS message_count FROM messages GROUP BY topic_id
@@ -90,7 +88,7 @@ func (s *Store) StatsSnapshot(limit int) (StatsSnapshot, error) {
 	var top []TopicStat
 	for rows.Next() {
 		var stat TopicStat
-		if err := rows.Scan(&stat.Topic, &stat.MessageCount, &stat.PendingCount, &stat.BacklogCount); err != nil {
+		if err := rows.Scan(&stat.Topic, &stat.MessageCount, &stat.PendingCount); err != nil {
 			return StatsSnapshot{}, err
 		}
 		top = append(top, stat)
@@ -107,69 +105,6 @@ func (s *Store) StatsSnapshot(limit int) (StatsSnapshot, error) {
 		Pending:       pending,
 		TopTopics:     top,
 	}, nil
-}
-
-// TopicStatsWithBacklog returns topic stats that include retention-delayed backlog.
-func (s *Store) TopicStatsWithBacklog(namespace string, cutoff time.Time, limit int) ([]TopicStat, error) {
-	info, err := topic.Parse(namespace + "/__validate")
-	if err != nil {
-		return nil, err
-	}
-	if !info.Persistent {
-		return nil, nil
-	}
-	if limit <= 0 {
-		limit = 10
-	}
-	rows, err := s.db.Query(
-		`SELECT t.full_name,
-			COALESCE(m.message_count, 0) AS message_count,
-			COALESCE(p.pending_count, 0) AS pending_count,
-			COALESCE(b.backlog_count, 0) AS backlog_count
-		 FROM topics t
-		 JOIN namespaces n ON n.id = t.namespace_id
-		 LEFT JOIN (
-			SELECT topic_id, COUNT(*) AS message_count FROM messages GROUP BY topic_id
-		 ) m ON m.topic_id = t.id
-		 LEFT JOIN (
-			SELECT topic_id, COUNT(*) AS pending_count FROM subscription_pending GROUP BY topic_id
-		 ) p ON p.topic_id = t.id
-		 LEFT JOIN (
-			SELECT m.topic_id, COUNT(*) AS backlog_count
-			  FROM messages m
-			  WHERE m.publish_time < ?
-			    AND m.id >= (
-				 SELECT MIN(c.next_message_id)
-				   FROM subscription_cursor c
-				  WHERE c.topic_id = m.topic_id
-				)
-			 GROUP BY m.topic_id
-		 ) b ON b.topic_id = t.id
-		 WHERE n.tenant = ? AND n.name = ?
-		 ORDER BY backlog_count DESC, pending_count DESC, message_count DESC, t.full_name
-		 LIMIT ?`,
-		cutoff.UnixMilli(),
-		info.Tenant,
-		info.Namespace,
-		limit,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var top []TopicStat
-	for rows.Next() {
-		var stat TopicStat
-		if err := rows.Scan(&stat.Topic, &stat.MessageCount, &stat.PendingCount, &stat.BacklogCount); err != nil {
-			return nil, err
-		}
-		top = append(top, stat)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return top, nil
 }
 
 // SubscriptionBacklogStats returns retention-delayed backlog counts per subscription.

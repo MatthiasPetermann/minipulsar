@@ -307,26 +307,24 @@ func renderTopTopics(stats broker.StatsSnapshot, width int) string {
 		return strings.Join(lines, "\n")
 	}
 
-	metricWidth := 7
-	topicWidth := width - metricWidth*3 - 3
+	metricWidth := 6
+	topicWidth := width - metricWidth*2 - 2
 	if topicWidth < 10 {
 		topicWidth = 10
 	}
 
-	head := fmt.Sprintf("%-*s %*s %*s %*s", topicWidth, "Topic", metricWidth, "Msgs", metricWidth, "Pend", metricWidth, "Backlog")
+	head := fmt.Sprintf("%-*s %*s %*s", topicWidth, "Topic", metricWidth, "Msgs", metricWidth, "Pend")
 	lines = append(lines, styles.label.Render(head))
 
 	for _, topic := range stats.TopTopics {
 		lines = append(lines, fmt.Sprintf(
-			"%-*s %*d %*d %*d",
+			"%-*s %*d %*d",
 			topicWidth,
 			truncate(topic.Topic, topicWidth),
 			metricWidth,
 			topic.MessageCount,
 			metricWidth,
 			topic.PendingCount,
-			metricWidth,
-			topic.BacklogCount,
 		))
 	}
 

@@ -43,10 +43,9 @@ func (b *Broker) StatsSnapshot(limit int) (StatsSnapshot, error) {
 		}, err
 	}
 
-	topTopics := storeStats.TopTopics
 	var subscriptionBacklog []storage.SubscriptionBacklogStat
 	if b.cfg.Messaging != nil && len(b.cfg.Messaging.NamespacePolicies) > 0 {
-		topTopics, subscriptionBacklog, err = b.backlogStats(limit)
+		subscriptionBacklog, err = b.backlogStats(limit)
 		if err != nil {
 			return StatsSnapshot{
 				Producers:    producers,
@@ -67,50 +66,26 @@ func (b *Broker) StatsSnapshot(limit int) (StatsSnapshot, error) {
 		Pending:                 storeStats.Pending,
 		MemoryAlloc:             allocBytes,
 		ThroughputPS:            throughput,
-		TopTopics:               topTopics,
+		TopTopics:               storeStats.TopTopics,
 		TopSubscriptionsBacklog: subscriptionBacklog,
 	}, nil
 }
 
-func (b *Broker) backlogStats(limit int) ([]storage.TopicStat, []storage.SubscriptionBacklogStat, error) {
+func (b *Broker) backlogStats(limit int) ([]storage.SubscriptionBacklogStat, error) {
 	if limit <= 0 {
 		limit = 10
 	}
 	now := time.Now()
-	var topics []storage.TopicStat
 	var subs []storage.SubscriptionBacklogStat
 	for namespace, policy := range b.cfg.Messaging.NamespacePolicies {
 		cutoff := now.Add(-policy.Retention)
-		nsTopics, err := b.store.TopicStatsWithBacklog(namespace, cutoff, limit)
-		if err != nil {
-			return nil, nil, err
-		}
-		if len(nsTopics) > 0 {
-			topics = append(topics, nsTopics...)
-		}
 		nsSubs, err := b.store.SubscriptionBacklogStats(namespace, cutoff, limit)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		if len(nsSubs) > 0 {
 			subs = append(subs, nsSubs...)
 		}
-	}
-
-	sort.Slice(topics, func(i, j int) bool {
-		if topics[i].BacklogCount != topics[j].BacklogCount {
-			return topics[i].BacklogCount > topics[j].BacklogCount
-		}
-		if topics[i].PendingCount != topics[j].PendingCount {
-			return topics[i].PendingCount > topics[j].PendingCount
-		}
-		if topics[i].MessageCount != topics[j].MessageCount {
-			return topics[i].MessageCount > topics[j].MessageCount
-		}
-		return topics[i].Topic < topics[j].Topic
-	})
-	if len(topics) > limit {
-		topics = topics[:limit]
 	}
 
 	sort.Slice(subs, func(i, j int) bool {
@@ -126,7 +101,7 @@ func (b *Broker) backlogStats(limit int) ([]storage.TopicStat, []storage.Subscri
 		subs = subs[:limit]
 	}
 
-	return topics, subs, nil
+	return subs, nil
 }
 
 func (b *Broker) recordMessage() {
