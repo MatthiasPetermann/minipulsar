@@ -267,6 +267,7 @@ func (b *Broker) handleSend(conn net.Conn, base *pulsar.BaseCommand, payloadSect
 	if cmd == nil {
 		return fmt.Errorf("SEND without payload")
 	}
+	b.waitForThrottle()
 	producerID := cmd.GetProducerId()
 
 	key := producerKey{conn: conn, id: producerID}

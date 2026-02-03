@@ -29,6 +29,7 @@ func (b *Broker) deliverNonPersistent(topic string, msg storage.Message) {
 			continue
 		}
 
+		b.waitForThrottle()
 		if err := b.writeMsgFrame(c.conn, c.id, msg); err != nil {
 			b.cfg.Logger.Warn("deliver write error", "err", err, "consumer_id", c.id)
 			continue
