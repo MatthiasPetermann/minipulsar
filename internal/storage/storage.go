@@ -301,11 +301,52 @@ func (s *Store) DropPendingByConsumer(topicName, sub string, consumerUID int64) 
 		return nil
 	}
 
-	_, err = s.db.Exec(
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.Exec(
+		"INSERT OR IGNORE INTO subscription_cursor(topic_id, name, next_message_id) VALUES(?, ?, 1)",
+		topicID, sub,
+	); err != nil {
+		return err
+	}
+
+	var minPending int64
+	if err := tx.QueryRow(
+		"SELECT COALESCE(MIN(message_id), 0) FROM subscription_pending WHERE topic_id=? AND name=? AND consumer_id=?",
+		topicID, sub, consumerUID,
+	).Scan(&minPending); err != nil {
+		return err
+	}
+
+	var cur int64
+	if err := tx.QueryRow(
+		"SELECT next_message_id FROM subscription_cursor WHERE topic_id=? AND name=?",
+		topicID, sub,
+	).Scan(&cur); err != nil {
+		return err
+	}
+
+	if _, err := tx.Exec(
 		"DELETE FROM subscription_pending WHERE topic_id=? AND name=? AND consumer_id=?",
 		topicID, sub, consumerUID,
-	)
-	return err
+	); err != nil {
+		return err
+	}
+
+	if minPending > 0 && (cur == 0 || minPending < cur) {
+		if _, err := tx.Exec(
+			"UPDATE subscription_cursor SET next_message_id=? WHERE topic_id=? AND name=?",
+			minPending, topicID, sub,
+		); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
 }
 
 // ClaimBatch atomically claims a batch of messages for delivery.
