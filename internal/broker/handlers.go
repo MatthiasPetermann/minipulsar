@@ -333,24 +333,18 @@ func (b *Broker) handleSend(conn net.Conn, base *pulsar.BaseCommand, payloadSect
 		return fmt.Errorf("payload checksum mismatch")
 	}
 
-	msg := storage.Message{
-		Topic:       p.topic,
+	topicInfo, err := topic.Parse(p.topic)
+	if err != nil {
+		return err
+	}
+	msg, err := b.publishMessage(topicInfo, storage.Message{
+		Topic:       topicInfo.FullName,
 		Payload:     payload,
 		SequenceID:  meta.GetSequenceId(),
 		PublishTime: int64(meta.GetPublishTime()),
-	}
-	if p.persistent {
-		if b.shouldPersistMessage(p.topic) {
-			if err := b.store.InsertMessage(&msg); err != nil {
-				return fmt.Errorf("insert message: %w", err)
-			}
-			b.kickTopic(p.topic)
-		} else {
-			msg.ID = b.nextNonPersistentID(p.topic)
-		}
-	} else {
-		msg.ID = b.nextNonPersistentID(p.topic)
-		b.deliverNonPersistent(p.topic, msg)
+	})
+	if err != nil {
+		return fmt.Errorf("publish message: %w", err)
 	}
 
 	b.recordMessage()
@@ -402,36 +396,20 @@ func (b *Broker) applyBindings(sourceTopic string, payload []byte) error {
 		if err != nil {
 			return fmt.Errorf("binding target invalid: %w", err)
 		}
-		msg := storage.Message{
+		if _, err := b.publishMessage(targetInfo, storage.Message{
 			Topic:       targetInfo.FullName,
 			Payload:     output,
 			SequenceID:  0,
 			PublishTime: time.Now().UnixMilli(),
-		}
-		if targetInfo.Persistent {
-			if b.shouldPersistMessage(targetInfo.FullName) {
-				if err := b.store.InsertMessage(&msg); err != nil {
-					return err
-				}
-				b.kickTopic(targetInfo.FullName)
-			} else {
-				msg.ID = b.nextNonPersistentID(targetInfo.FullName)
-			}
-		} else {
-			msg.ID = b.nextNonPersistentID(targetInfo.FullName)
-			b.deliverNonPersistent(targetInfo.FullName, msg)
+		}); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
-func (b *Broker) shouldPersistMessage(topicName string) bool {
+func (b *Broker) shouldPersistMessage(info topic.Info) bool {
 	if b.cfg.Messaging == nil {
-		return true
-	}
-	info, err := topic.Parse(topicName)
-	if err != nil {
-		b.cfg.Logger.Warn("policy lookup failed", "topic", topicName, "err", err)
 		return true
 	}
 	policy, ok := b.cfg.Messaging.PolicyForTopic(info)
@@ -441,9 +419,9 @@ func (b *Broker) shouldPersistMessage(topicName string) bool {
 	if policy.Retention > 0 {
 		return true
 	}
-	hasSubs, err := b.store.HasSubscriptions(topicName)
+	hasSubs, err := b.store.HasSubscriptions(info.FullName)
 	if err != nil {
-		b.cfg.Logger.Warn("subscription lookup failed", "topic", topicName, "err", err)
+		b.cfg.Logger.Warn("subscription lookup failed", "topic", info.FullName, "err", err)
 		return true
 	}
 	return hasSubs

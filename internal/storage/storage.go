@@ -3,6 +3,7 @@ package storage
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"minipulsar/internal/topic"
@@ -45,7 +46,7 @@ const (
 // Open creates a new Store backed by the provided SQLite database path.
 // The caller must call InitSchema before serving traffic.
 func Open(path string) (*Store, error) {
-	db, err := sql.Open("sqlite3", path)
+	db, err := sql.Open("sqlite3", addSQLiteSettings(path))
 	if err != nil {
 		return nil, err
 	}
@@ -64,9 +65,6 @@ func (s *Store) DB() *sql.DB {
 // delivery cursors, and pending acknowledgements.
 func (s *Store) InitSchema() error {
 	schema := `
-PRAGMA journal_mode=WAL;
-PRAGMA busy_timeout=5000;
-
 CREATE TABLE IF NOT EXISTS namespaces (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   tenant TEXT NOT NULL,
@@ -579,4 +577,29 @@ func addColumnIfMissing(db *sql.DB, table, column, ddl string) error {
 	}
 	_, err = db.Exec(ddl)
 	return err
+}
+
+func addSQLiteSettings(path string) string {
+	const busyTimeout = "_busy_timeout=5000"
+	const journalMode = "_journal_mode=WAL"
+
+	hasBusyTimeout := strings.Contains(path, busyTimeout)
+	hasJournalMode := strings.Contains(path, journalMode)
+	if hasBusyTimeout && hasJournalMode {
+		return path
+	}
+
+	separator := "?"
+	if strings.Contains(path, "?") {
+		separator = "&"
+	}
+
+	if !hasBusyTimeout {
+		path += separator + busyTimeout
+		separator = "&"
+	}
+	if !hasJournalMode {
+		path += separator + journalMode
+	}
+	return path
 }
