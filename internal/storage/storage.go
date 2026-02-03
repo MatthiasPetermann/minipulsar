@@ -195,7 +195,7 @@ func (s *Store) EnsureSubscription(topicName, name string, position Subscription
 			return err
 		}
 		if _, err := tx.Exec(
-			"INSERT INTO subscription_cursor(topic_id, name, next_message_id) VALUES(?, ?, ?)",
+			"INSERT OR REPLACE INTO subscription_cursor(topic_id, name, next_message_id) VALUES(?, ?, ?)",
 			topicID, name, nextID,
 		); err != nil {
 			return err

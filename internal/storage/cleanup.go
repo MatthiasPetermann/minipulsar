@@ -203,6 +203,74 @@ func (s *Store) PruneEmptyTopics(namespace string, exclude []string) (int64, err
 	return affected, nil
 }
 
+// PruneOrphanedSubscriptionData removes cursor/pending rows that no longer have a subscription.
+func (s *Store) PruneOrphanedSubscriptionData(namespace string) (int64, int64, error) {
+	info, err := topic.Parse(namespace + "/__validate")
+	if err != nil {
+		return 0, 0, err
+	}
+	if !info.Persistent {
+		return 0, 0, nil
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	pendingRes, err := tx.Exec(
+		`DELETE FROM subscription_pending
+		 WHERE topic_id IN (
+			SELECT t.id
+			  FROM topics t
+			  JOIN namespaces n ON n.id = t.namespace_id
+			 WHERE n.tenant = ? AND n.name = ?
+		  )
+		   AND NOT EXISTS (
+			 SELECT 1 FROM subscriptions s
+			  WHERE s.topic_id = subscription_pending.topic_id
+			    AND s.name = subscription_pending.name
+		   )`,
+		info.Tenant, info.Namespace,
+	)
+	if err != nil {
+		return 0, 0, err
+	}
+	pendingCount, err := pendingRes.RowsAffected()
+	if err != nil {
+		return 0, 0, err
+	}
+
+	cursorRes, err := tx.Exec(
+		`DELETE FROM subscription_cursor
+		 WHERE topic_id IN (
+			SELECT t.id
+			  FROM topics t
+			  JOIN namespaces n ON n.id = t.namespace_id
+			 WHERE n.tenant = ? AND n.name = ?
+		  )
+		   AND NOT EXISTS (
+			 SELECT 1 FROM subscriptions s
+			  WHERE s.topic_id = subscription_cursor.topic_id
+			    AND s.name = subscription_cursor.name
+		   )`,
+		info.Tenant, info.Namespace,
+	)
+	if err != nil {
+		return 0, 0, err
+	}
+	cursorCount, err := cursorRes.RowsAffected()
+	if err != nil {
+		return 0, 0, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, 0, err
+	}
+	return cursorCount, pendingCount, nil
+}
+
 func scanSubscriptionCursor(db *sql.DB, sub string) (int64, error) {
 	var nextID int64
 	err := db.QueryRow(
