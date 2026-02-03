@@ -264,6 +264,90 @@ func TestPruneStaleSubscriptions(t *testing.T) {
 	}
 }
 
+func TestEnsureSubscriptionReplacesOrphanedCursor(t *testing.T) {
+	store := openExtraTestStore(t)
+	topic := "persistent://public/default/orphaned-cursor-test"
+
+	if err := store.EnsureSubscription(topic, "sub", InitialPositionEarliest, SubscriptionTypeShared); err != nil {
+		t.Fatalf("ensure subscription: %v", err)
+	}
+
+	if _, err := store.db.Exec(
+		"DELETE FROM subscriptions WHERE name=?",
+		"sub",
+	); err != nil {
+		t.Fatalf("delete subscription: %v", err)
+	}
+
+	if err := store.EnsureSubscription(topic, "sub", InitialPositionEarliest, SubscriptionTypeShared); err != nil {
+		t.Fatalf("recreate subscription: %v", err)
+	}
+
+	nextID, err := scanSubscriptionCursor(store.db, "sub")
+	if err != nil {
+		t.Fatalf("query cursor: %v", err)
+	}
+	if nextID != 1 {
+		t.Fatalf("expected cursor reset to 1, got %d", nextID)
+	}
+}
+
+func TestPruneOrphanedSubscriptionData(t *testing.T) {
+	store := openExtraTestStore(t)
+	topic := "persistent://public/default/orphaned-sub-data-test"
+
+	if err := store.EnsureSubscription(topic, "sub", InitialPositionEarliest, SubscriptionTypeShared); err != nil {
+		t.Fatalf("ensure subscription: %v", err)
+	}
+	if err := store.EnsureSubscription(topic, "active", InitialPositionEarliest, SubscriptionTypeShared); err != nil {
+		t.Fatalf("ensure subscription: %v", err)
+	}
+
+	var topicID int64
+	if err := store.db.QueryRow(
+		"SELECT id FROM topics WHERE full_name=?",
+		topic,
+	).Scan(&topicID); err != nil {
+		t.Fatalf("lookup topic id: %v", err)
+	}
+
+	if _, err := store.db.Exec(
+		"DELETE FROM subscriptions WHERE topic_id=? AND name=?",
+		topicID, "sub",
+	); err != nil {
+		t.Fatalf("delete subscription: %v", err)
+	}
+
+	if _, err := store.db.Exec(
+		"INSERT INTO subscription_pending(topic_id, name, message_id, consumer_id, delivered_at) VALUES(?,?,?,?,?)",
+		topicID, "sub", int64(101), int64(7), time.Now().UnixMilli(),
+	); err != nil {
+		t.Fatalf("insert orphaned pending: %v", err)
+	}
+
+	cursors, pending, err := store.PruneOrphanedSubscriptionData("persistent://public/default")
+	if err != nil {
+		t.Fatalf("prune orphaned subscription data: %v", err)
+	}
+	if cursors != 1 {
+		t.Fatalf("expected 1 cursor pruned, got %d", cursors)
+	}
+	if pending != 1 {
+		t.Fatalf("expected 1 pending pruned, got %d", pending)
+	}
+
+	var activeCursor int
+	if err := store.db.QueryRow(
+		"SELECT COUNT(*) FROM subscription_cursor WHERE name=?",
+		"active",
+	).Scan(&activeCursor); err != nil {
+		t.Fatalf("count active cursor: %v", err)
+	}
+	if activeCursor != 1 {
+		t.Fatalf("expected active cursor to remain, got %d", activeCursor)
+	}
+}
+
 func TestPruneOrphanedMessages(t *testing.T) {
 	store := openExtraTestStore(t)
 	topic := "persistent://public/default/retention-test"

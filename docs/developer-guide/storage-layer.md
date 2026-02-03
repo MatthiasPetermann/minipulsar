@@ -18,6 +18,9 @@ The schema includes these tables:
 The schema is created in `Store.InitSchema` and is migrated with
 `addColumnIfMissing` for incremental changes.
 
+For a detailed entity diagram and consistency expectations, see
+`docs/database-model.md`.
+
 ## Topic and namespace normalization
 
 All storage operations parse the topic name with `internal/topic.Parse` and
@@ -75,6 +78,8 @@ Namespace-level maintenance is handled in `internal/storage/cleanup.go`:
 - `PruneOrphanedMessages`: removes messages for topics with **no subscriptions**.
 - `PruneEmptyTopics`: removes topics that have no messages or subscriptions,
   excluding any topics explicitly marked as active by the broker.
+- `PruneOrphanedSubscriptionData`: removes cursor/pending rows that no longer
+  have matching subscriptions.
 
 ## Stats
 
