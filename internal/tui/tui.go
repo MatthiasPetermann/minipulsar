@@ -66,16 +66,19 @@ func NewProgram(b *broker.Broker, logCh <-chan string, levelVar *slog.LevelVar, 
 	return tea.NewProgram(m, tea.WithAltScreen())
 }
 
+// Init kicks off periodic ticks and log streaming for the TUI.
 func (m model) Init() tea.Cmd {
 	return tea.Batch(tick(), waitForLog(m.logCh))
 }
 
+// tick emits a periodic message used to refresh stats.
 func tick() tea.Cmd {
 	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
 		return tickMsg(t)
 	})
 }
 
+// waitForLog blocks until the next log line arrives from the broker logger.
 func waitForLog(logCh <-chan string) tea.Cmd {
 	return func() tea.Msg {
 		line, ok := <-logCh
@@ -83,6 +86,7 @@ func waitForLog(logCh <-chan string) tea.Cmd {
 	}
 }
 
+// fetchStats pulls a snapshot from the broker for the dashboard panels.
 func fetchStats(b *broker.Broker) tea.Cmd {
 	return func() tea.Msg {
 		stats, err := b.StatsSnapshot(defaultTopLimit)
@@ -90,6 +94,7 @@ func fetchStats(b *broker.Broker) tea.Cmd {
 	}
 }
 
+// Update handles user input, timer ticks, and log messages.
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -137,6 +142,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// resize recalculates layout metrics whenever the terminal size changes.
 func (m *model) resize() {
 	if m.width == 0 || m.height == 0 {
 		return
@@ -194,6 +200,7 @@ func (m *model) resize() {
 	}
 }
 
+// View renders the current TUI frame.
 func (m model) View() string {
 	if !m.ready {
 		return "loading..."
@@ -246,6 +253,7 @@ type styleSet struct {
 	bar        lipgloss.Style
 }
 
+// newStyles defines the synthwave color palette and component styles.
 func newStyles() styleSet {
 	bg := lipgloss.Color("#1B1035")
 	pink := lipgloss.Color("#F72585")
@@ -279,6 +287,7 @@ func newStyles() styleSet {
 	}
 }
 
+// renderOverview builds the left-hand stats panel.
 func renderOverview(stats broker.StatsSnapshot, err error) string {
 	styles := newStyles()
 	lines := []string{
@@ -298,6 +307,7 @@ func renderOverview(stats broker.StatsSnapshot, err error) string {
 	return strings.Join(lines, "\n")
 }
 
+// renderTopTopics builds the right-hand topic activity panel.
 func renderTopTopics(stats broker.StatsSnapshot, width int) string {
 	styles := newStyles()
 	lines := []string{styles.accent.Render("Top Topics"), ""}
@@ -331,6 +341,7 @@ func renderTopTopics(stats broker.StatsSnapshot, width int) string {
 	return strings.Join(lines, "\n")
 }
 
+// truncate shortens strings to fit in fixed-width columns.
 func truncate(s string, width int) string {
 	if width <= 0 || len(s) <= width {
 		return s
@@ -341,6 +352,7 @@ func truncate(s string, width int) string {
 	return s[:width-1] + "…"
 }
 
+// formatBytes formats byte counts with binary suffixes.
 func formatBytes(value uint64) string {
 	const unit = 1024
 	if value < unit {
@@ -354,6 +366,7 @@ func formatBytes(value uint64) string {
 	return fmt.Sprintf("%.1f %cB", float64(value)/float64(div), "KMGTPE"[exp])
 }
 
+// rotateLogLevel cycles the UI log level and updates the shared slog level.
 func (m *model) rotateLogLevel() {
 	if m.level == nil {
 		return
@@ -371,6 +384,7 @@ func (m *model) rotateLogLevel() {
 	m.level.Set(next)
 }
 
+// normalizeLevel clamps arbitrary levels to the nearest supported label.
 func normalizeLevel(level slog.Level) slog.Level {
 	if level <= slog.LevelDebug {
 		return slog.LevelDebug
@@ -388,6 +402,7 @@ func normalizeLevel(level slog.Level) slog.Level {
 	}
 }
 
+// logLevelLabel formats the log level for the help footer.
 func logLevelLabel(level slog.Level) string {
 	switch normalizeLevel(level) {
 	case slog.LevelDebug:
@@ -403,6 +418,7 @@ func logLevelLabel(level slog.Level) string {
 	}
 }
 
+// rotateDelayLevel cycles broker throttling delay from the UI.
 func (m *model) rotateDelayLevel() {
 	next := m.delayLevel + 1
 	if next > broker.MaxThrottleLevel {
@@ -411,11 +427,13 @@ func (m *model) rotateDelayLevel() {
 	m.delayLevel = m.broker.SetThrottleLevel(next)
 }
 
+// togglePause toggles the broker-wide pause flag from the UI.
 func (m *model) togglePause() {
 	m.paused = !m.paused
 	m.broker.SetThrottlePaused(m.paused)
 }
 
+// pauseLabel formats the pause state for the footer.
 func pauseLabel(paused bool) string {
 	if paused {
 		return "on"

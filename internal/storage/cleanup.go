@@ -271,6 +271,7 @@ func (s *Store) PruneOrphanedSubscriptionData(namespace string) (int64, int64, e
 	return cursorCount, pendingCount, nil
 }
 
+// scanSubscriptionCursor reads the next_message_id for a subscription cursor.
 func scanSubscriptionCursor(db *sql.DB, sub string) (int64, error) {
 	var nextID int64
 	err := db.QueryRow(

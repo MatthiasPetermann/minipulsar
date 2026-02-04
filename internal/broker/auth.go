@@ -23,6 +23,8 @@ type jwtClaims struct {
 	Exp   *int64      `json:"exp"`
 }
 
+// rolesFromConnect parses a CONNECT frame's JWT token and extracts roles.
+// It supports HS256 tokens and returns nil when no auth data is present.
 func rolesFromConnect(cmd *pulsar.CommandConnect, secret []byte) ([]string, error) {
 	if cmd == nil {
 		return nil, nil
@@ -82,6 +84,7 @@ func rolesFromConnect(cmd *pulsar.CommandConnect, secret []byte) ([]string, erro
 	return roles, nil
 }
 
+// extractRoles normalizes JWT role claims into a string slice.
 func extractRoles(claims jwtClaims) []string {
 	if claims.Role != "" {
 		return []string{claims.Role}
@@ -113,6 +116,7 @@ func extractRoles(claims jwtClaims) []string {
 	}
 }
 
+// verifyHS256 validates the HMAC signature for a JWT token.
 func verifyHS256(encodedHeader, encodedPayload, encodedSignature string, secret []byte) error {
 	mac := hmac.New(sha256.New, secret)
 	_, _ = mac.Write([]byte(encodedHeader))

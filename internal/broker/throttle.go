@@ -36,6 +36,7 @@ func (b *Broker) ThrottlePaused() bool {
 	return b.throttlePaused.Load()
 }
 
+// waitForThrottle blocks based on pause state and current throttle delay.
 func (b *Broker) waitForThrottle() {
 	for b.throttlePaused.Load() {
 		time.Sleep(pausePollDelay)

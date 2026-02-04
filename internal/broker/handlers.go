@@ -374,6 +374,9 @@ func (b *Broker) handleSend(conn net.Conn, base *pulsar.BaseCommand, payloadSect
 	return b.writeCommand(conn, resp)
 }
 
+// applyBindings routes a published message through configured Lua bindings.
+// It delegates execution to the messaging runtime pool and republishes outputs,
+// mirroring how the control plane connects topics across layers.
 func (b *Broker) applyBindings(sourceTopic string, payload []byte) error {
 	if b.cfg.Messaging == nil || b.cfg.Messaging.Pool == nil {
 		return nil
@@ -408,6 +411,8 @@ func (b *Broker) applyBindings(sourceTopic string, payload []byte) error {
 	return nil
 }
 
+// shouldPersistMessage decides if a message should be stored or only delivered
+// in-memory based on namespace retention and existing subscriptions.
 func (b *Broker) shouldPersistMessage(info topic.Info) bool {
 	if b.cfg.Messaging == nil {
 		return true

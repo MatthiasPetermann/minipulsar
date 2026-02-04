@@ -127,6 +127,7 @@ func (s *Server) Stop() {
 	s.wg.Wait()
 }
 
+// collectLoop periodically captures broker stats for the /metrics endpoint.
 func (s *Server) collectLoop() {
 	defer s.wg.Done()
 	ticker := time.NewTicker(s.cfg.ScrapeInterval)
@@ -143,6 +144,7 @@ func (s *Server) collectLoop() {
 	}
 }
 
+// collectOnce pulls stats from the broker and stores the latest snapshot.
 func (s *Server) collectOnce() {
 	start := time.Now()
 	stats, err := s.broker.StatsSnapshot(s.cfg.TopTopicsLimit)
@@ -177,6 +179,7 @@ func (s *Server) collectOnce() {
 	s.mu.Unlock()
 }
 
+// handleMetrics writes Prometheus text format for the latest snapshot.
 func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 
@@ -221,35 +224,42 @@ func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 	}
 }
 
+// writeGauge emits a Prometheus gauge metric with integer values.
 func writeGauge(w http.ResponseWriter, name, help string, value int) {
 	writeGaugeHeader(w, name, help)
 	fmt.Fprintf(w, "%s %d\n", name, value)
 }
 
+// writeGaugeFloat emits a Prometheus gauge metric with float values.
 func writeGaugeFloat(w http.ResponseWriter, name, help string, value float64) {
 	writeGaugeHeader(w, name, help)
 	fmt.Fprintf(w, "%s %f\n", name, value)
 }
 
+// writeCounter emits a Prometheus counter metric.
 func writeCounter(w http.ResponseWriter, name, help string, value uint64) {
 	writeCounterHeader(w, name, help)
 	fmt.Fprintf(w, "%s %d\n", name, value)
 }
 
+// writeGaugeHeader emits the type/help header for a gauge metric.
 func writeGaugeHeader(w http.ResponseWriter, name, help string) {
 	fmt.Fprintf(w, "# HELP %s %s\n", name, help)
 	fmt.Fprintf(w, "# TYPE %s gauge\n", name)
 }
 
+// writeCounterHeader emits the type/help header for a counter metric.
 func writeCounterHeader(w http.ResponseWriter, name, help string) {
 	fmt.Fprintf(w, "# HELP %s %s\n", name, help)
 	fmt.Fprintf(w, "# TYPE %s counter\n", name)
 }
 
+// writeGaugeWithLabels emits a gauge metric with label key/value pairs.
 func writeGaugeWithLabels(w http.ResponseWriter, name string, value float64, labels map[string]string) {
 	fmt.Fprintf(w, "%s{%s} %f\n", name, renderLabels(labels), value)
 }
 
+// renderLabels formats label maps into Prometheus label syntax.
 func renderLabels(labels map[string]string) string {
 	if len(labels) == 0 {
 		return ""
@@ -266,6 +276,7 @@ func renderLabels(labels map[string]string) string {
 	return strings.Join(parts, ",")
 }
 
+// escapeLabel escapes label values for Prometheus output.
 func escapeLabel(value string) string {
 	value = strings.ReplaceAll(value, "\\", "\\\\")
 	value = strings.ReplaceAll(value, "\n", "\\\\n")

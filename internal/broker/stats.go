@@ -71,6 +71,7 @@ func (b *Broker) StatsSnapshot(limit int) (StatsSnapshot, error) {
 	}, nil
 }
 
+// backlogStats gathers per-subscription backlog metrics for retention policies.
 func (b *Broker) backlogStats(limit int) ([]storage.SubscriptionBacklogStat, error) {
 	if limit <= 0 {
 		limit = 10
@@ -102,10 +103,12 @@ func (b *Broker) backlogStats(limit int) ([]storage.SubscriptionBacklogStat, err
 	return subs, nil
 }
 
+// recordMessage increments the broker-wide message counter for throughput stats.
 func (b *Broker) recordMessage() {
 	b.messageCounter.Add(1)
 }
 
+// throughputPerSecond computes messages/sec based on monotonic counters.
 func (b *Broker) throughputPerSecond() float64 {
 	now := time.Now()
 	total := b.messageCounter.Load()
@@ -129,6 +132,7 @@ func (b *Broker) throughputPerSecond() float64 {
 	return throughput
 }
 
+// currentAlloc returns the current heap allocation in bytes.
 func currentAlloc() uint64 {
 	var ms runtime.MemStats
 	runtime.ReadMemStats(&ms)

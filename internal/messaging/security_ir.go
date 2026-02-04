@@ -104,6 +104,7 @@ func (s *SecurityIR) Allows(namespace string, action Action, roles []string) boo
 	return false
 }
 
+// toRoleSet normalizes role slices into a lookup map for policy checks.
 func toRoleSet(roles []string) map[string]struct{} {
 	set := make(map[string]struct{}, len(roles))
 	for _, role := range roles {
