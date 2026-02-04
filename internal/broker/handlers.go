@@ -342,6 +342,7 @@ func (b *Broker) handleSend(conn net.Conn, base *pulsar.BaseCommand, payloadSect
 		Payload:     payload,
 		SequenceID:  meta.GetSequenceId(),
 		PublishTime: int64(meta.GetPublishTime()),
+		Properties:  protocol.PropertiesFromKeyValues(meta.GetProperties()),
 	})
 	if err != nil {
 		return fmt.Errorf("publish message: %w", err)

@@ -71,6 +71,7 @@ func WriteMessageFrame(w io.Writer, consumerID uint64, msg storage.Message) erro
 		ProducerName: proto.String("minipulsar"),
 		SequenceId:   proto.Uint64(msg.SequenceID),
 		PublishTime:  proto.Uint64(uint64(publishTime)),
+		Properties:   KeyValuesFromProperties(msg.Properties),
 	}
 	metaBytes, err := proto.Marshal(meta)
 	if err != nil {

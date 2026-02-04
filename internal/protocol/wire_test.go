@@ -59,6 +59,10 @@ func TestWriteMessageFrame(t *testing.T) {
 		Payload:     []byte("payload"),
 		SequenceID:  7,
 		PublishTime: 1234567890,
+		Properties: map[string]string{
+			"region": "eu",
+			"tier":   "gold",
+		},
 	}
 
 	var buf bytes.Buffer
@@ -135,6 +139,17 @@ func TestWriteMessageFrame(t *testing.T) {
 	}
 	if metadata.GetPublishTime() != uint64(msg.PublishTime) {
 		t.Fatalf("unexpected publish time: %d", metadata.GetPublishTime())
+	}
+	if len(metadata.GetProperties()) != len(msg.Properties) {
+		t.Fatalf("unexpected properties length: %d", len(metadata.GetProperties()))
+	}
+	for _, kv := range metadata.GetProperties() {
+		if kv == nil {
+			t.Fatalf("unexpected nil property")
+		}
+		if msg.Properties[kv.GetKey()] != kv.GetValue() {
+			t.Fatalf("unexpected property %q=%q", kv.GetKey(), kv.GetValue())
+		}
 	}
 	if !bytes.Equal(payload, msg.Payload) {
 		t.Fatalf("unexpected payload: %q", payload)
