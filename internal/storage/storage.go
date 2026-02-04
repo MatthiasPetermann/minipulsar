@@ -464,6 +464,7 @@ func (s *Store) ClaimBatch(topicName, sub string, consumerUID int64, limit int) 
 	return res, nil
 }
 
+// lookupTopicID resolves a topic name to its database ID.
 func (s *Store) lookupTopicID(topicName string) (int64, error) {
 	info, err := topic.Parse(topicName)
 	if err != nil {
@@ -513,6 +514,7 @@ func (s *Store) HasSubscriptions(topicName string) (bool, error) {
 	return true, nil
 }
 
+// ensureTopic creates namespace/topic records when missing and returns the topic ID.
 func ensureTopic(tx *sql.Tx, info topic.Info) (int64, error) {
 	if !info.Persistent {
 		return 0, fmt.Errorf("non-persistent topic cannot be stored: %s", info.FullName)
@@ -551,6 +553,7 @@ func ensureTopic(tx *sql.Tx, info topic.Info) (int64, error) {
 	return topicID, nil
 }
 
+// addColumnIfMissing is a lightweight migration helper for additive columns.
 func addColumnIfMissing(db *sql.DB, table, column, ddl string) error {
 	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
 	if err != nil {
@@ -579,6 +582,7 @@ func addColumnIfMissing(db *sql.DB, table, column, ddl string) error {
 	return err
 }
 
+// addSQLiteSettings appends connection settings for WAL, busy timeout, etc.
 func addSQLiteSettings(path string) string {
 	const busyTimeout = "_busy_timeout=5000"
 	const journalMode = "_journal_mode=WAL"

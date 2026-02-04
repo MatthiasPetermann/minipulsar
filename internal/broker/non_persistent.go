@@ -4,6 +4,7 @@ import (
 	"minipulsar/internal/storage"
 )
 
+// nextNonPersistentID allocates a monotonic ID for non-persistent deliveries.
 func (b *Broker) nextNonPersistentID(topic string) int64 {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -11,6 +12,7 @@ func (b *Broker) nextNonPersistentID(topic string) int64 {
 	return int64(b.nonPersistentSeq[topic])
 }
 
+// deliverNonPersistent pushes messages directly to consumers without storage.
 func (b *Broker) deliverNonPersistent(topic string, msg storage.Message) {
 	var subs []*subState
 	b.mu.RLock()

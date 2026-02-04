@@ -227,6 +227,7 @@ func (r *Runtime) ValidateFunctions() error {
 	return nil
 }
 
+// normalizeNamespace validates and canonicalizes a namespace string.
 func normalizeNamespace(raw string) (string, error) {
 	if strings.TrimSpace(raw) == "" {
 		return "", fmt.Errorf("namespace is empty")

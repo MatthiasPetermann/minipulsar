@@ -133,6 +133,7 @@ func (b *Broker) writeMsgFrame(conn net.Conn, consumerID uint64, msg storage.Mes
 	return protocol.WriteMessageFrame(conn, consumerID, msg)
 }
 
+// setWriteDeadline applies the configured write timeout if enabled.
 func (b *Broker) setWriteDeadline(conn net.Conn) {
 	if b.cfg.WriteTimeout <= 0 {
 		return

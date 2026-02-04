@@ -97,6 +97,7 @@ type luaFunction struct {
 	maxRuntime time.Duration
 }
 
+// newLuaWorker loads Lua scripts once per worker to avoid per-call setup cost.
 func newLuaWorker(registry *FunctionRegistry) (*luaWorker, error) {
 	state := lua.NewState()
 	openSafeLibs(state)
@@ -120,6 +121,7 @@ func newLuaWorker(registry *FunctionRegistry) (*luaWorker, error) {
 	return &luaWorker{state: state, functions: functions}, nil
 }
 
+// loop processes function tasks sequentially on a single Lua state.
 func (w *luaWorker) loop(tasks <-chan functionTask, logger *logging.Logger) {
 	for task := range tasks {
 		payload, err := w.execute(task.functionID, task.payload, task.ctx)
@@ -130,6 +132,7 @@ func (w *luaWorker) loop(tasks <-chan functionTask, logger *logging.Logger) {
 	}
 }
 
+// execute invokes the Lua handle function with payload and context metadata.
 func (w *luaWorker) execute(functionID string, payload []byte, ctx FunctionContext) ([]byte, error) {
 	fn := w.functions[functionID]
 	if fn.fn == nil {
@@ -167,6 +170,7 @@ func (w *luaWorker) execute(functionID string, payload []byte, ctx FunctionConte
 	return []byte(value), nil
 }
 
+// openSafeLibs exposes a minimal set of Lua stdlib modules for safety.
 func openSafeLibs(state *lua.LState) {
 	lua.OpenBase(state)
 	lua.OpenTable(state)
@@ -174,6 +178,7 @@ func openSafeLibs(state *lua.LState) {
 	lua.OpenMath(state)
 }
 
+// validateLuaFunction ensures a Lua script defines the expected handle entrypoint.
 func validateLuaFunction(path string) error {
 	state := lua.NewState()
 	defer state.Close()

@@ -23,6 +23,7 @@ func (b *Broker) startNamespaceMaintenance() {
 	}()
 }
 
+// runNamespaceMaintenance executes retention and subscription cleanup per namespace.
 func (b *Broker) runNamespaceMaintenance() {
 	now := time.Now()
 	for namespace, policy := range b.cfg.Messaging.NamespacePolicies {
@@ -60,6 +61,7 @@ func (b *Broker) runNamespaceMaintenance() {
 	}
 }
 
+// touchActiveSubscriptions updates last-seen timestamps for active subscriptions.
 func (b *Broker) touchActiveSubscriptions(namespace string) {
 	subs := b.activeSubscriptionsForNamespace(namespace)
 	if len(subs) == 0 {
@@ -70,6 +72,7 @@ func (b *Broker) touchActiveSubscriptions(namespace string) {
 	}
 }
 
+// activeSubscriptionsForNamespace collects subscriptions that still have consumers.
 func (b *Broker) activeSubscriptionsForNamespace(namespace string) []storage.SubscriptionRef {
 	info, err := topic.Parse(namespace + "/__validate")
 	if err != nil {
@@ -108,6 +111,7 @@ func (b *Broker) activeSubscriptionsForNamespace(namespace string) []storage.Sub
 	return active
 }
 
+// dropSubscriptionStates removes in-memory state for subscriptions removed by cleanup.
 func (b *Broker) dropSubscriptionStates(dropped []storage.DroppedSubscription) {
 	for _, entry := range dropped {
 		key := subKey{topic: entry.Topic, name: entry.Subscription}
@@ -129,6 +133,7 @@ func (b *Broker) dropSubscriptionStates(dropped []storage.DroppedSubscription) {
 	}
 }
 
+// activeTopicsForNamespace collects topics currently referenced by producers/consumers/bindings.
 func (b *Broker) activeTopicsForNamespace(namespace string) []string {
 	info, err := topic.Parse(namespace + "/__validate")
 	if err != nil {

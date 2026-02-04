@@ -23,6 +23,21 @@ system, so you can reason about behavior, extend it, or debug it effectively.
 - **Jump to a subsystem** when you want implementation details: every section
   links directly to the relevant packages and call paths.
 
+## Commenting conventions
+
+Minipulsar favors Go-style doc comments and short inline notes that explain the
+intent behind broker actions, especially where multiple layers interact.
+
+- **Public types and functions** include doc comments describing their purpose,
+  the layer they belong to, and the upstream/downstream dependencies they serve.
+- **Cross-layer flow** (for example broker → storage or broker → messaging) is
+  called out inline so readers can trace why work is delegated.
+- **Operational helpers** (metrics, TUI, logging) include comments explaining
+  how they surface broker state without coupling to core logic.
+
+When you add new behavior, update comments to reflect *why* the logic exists
+and which layer consumes it so the guide and code stay aligned.
+
 ## Architectural summary
 
 Minipulsar is a small Pulsar-compatible broker with these major runtime layers:

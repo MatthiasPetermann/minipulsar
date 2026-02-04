@@ -130,6 +130,8 @@ func (b *Broker) deliveryLoop(s *subState) {
 	}
 }
 
+// readyConsumer finds any consumer with available permits when waking delivery.
+// It honors the subscription delivery semantics for the subscription type.
 func (s *subState) readyConsumer() *consumer {
 	switch s.subType {
 	case pulsar.CommandSubscribe_Shared:
@@ -151,6 +153,8 @@ func (s *subState) readyConsumer() *consumer {
 	}
 }
 
+// selectConsumerWithPermits chooses the next consumer for dispatch.
+// Shared subscriptions use round-robin; others use a fixed owner.
 func (s *subState) selectConsumerWithPermits() *consumer {
 	switch s.subType {
 	case pulsar.CommandSubscribe_Shared:
@@ -164,6 +168,7 @@ func (s *subState) selectConsumerWithPermits() *consumer {
 	}
 }
 
+// firstConsumerWithPermits returns the first consumer if it can accept a message.
 func (s *subState) firstConsumerWithPermits() *consumer {
 	if len(s.consumers) == 0 {
 		return nil
@@ -178,6 +183,7 @@ func (s *subState) firstConsumerWithPermits() *consumer {
 	return nil
 }
 
+// primaryConsumerWithPermits returns the highest-priority consumer with permits.
 func (s *subState) primaryConsumerWithPermits() *consumer {
 	if len(s.consumers) == 0 {
 		return nil

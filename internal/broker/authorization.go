@@ -8,6 +8,7 @@ import (
 	"minipulsar/internal/topic"
 )
 
+// namespaceFromTopic builds a Pulsar namespace string for policy checks.
 func (b *Broker) namespaceFromTopic(info topic.Info) string {
 	scheme := "persistent"
 	if !info.Persistent {
@@ -16,6 +17,7 @@ func (b *Broker) namespaceFromTopic(info topic.Info) string {
 	return fmt.Sprintf("%s://%s/%s", scheme, info.Tenant, info.Namespace)
 }
 
+// rolesForConn returns cached JWT roles for a connection.
 func (b *Broker) rolesForConn(conn net.Conn) []string {
 	b.mu.RLock()
 	roles := b.connRoles[conn]
@@ -23,6 +25,7 @@ func (b *Broker) rolesForConn(conn net.Conn) []string {
 	return roles
 }
 
+// authorize enforces control-plane rules before broker operations proceed.
 func (b *Broker) authorize(conn net.Conn, info topic.Info, action messaging.Action) error {
 	if b.cfg.Messaging == nil || b.cfg.Messaging.Security == nil {
 		return nil

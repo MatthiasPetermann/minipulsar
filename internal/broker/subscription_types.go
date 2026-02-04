@@ -7,6 +7,7 @@ import (
 	pulsar "minipulsar/pb"
 )
 
+// subscriptionTypeForStorage maps wire-level subscription types to storage enums.
 func subscriptionTypeForStorage(subType pulsar.CommandSubscribe_SubType) (storage.SubscriptionType, error) {
 	switch subType {
 	case pulsar.CommandSubscribe_Exclusive:

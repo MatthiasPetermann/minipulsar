@@ -7,6 +7,8 @@ import (
 	"minipulsar/internal/topic"
 )
 
+// publishMessage persists or delivers a message based on topic durability rules.
+// It also triggers subscription delivery in the storage-backed path.
 func (b *Broker) publishMessage(info topic.Info, msg storage.Message) (storage.Message, error) {
 	if msg.PublishTime == 0 {
 		msg.PublishTime = time.Now().UnixMilli()

@@ -238,6 +238,7 @@ func main() {
 	}
 }
 
+// buildMessagingRuntime wires the messaging control plane runtime and pool.
 func buildMessagingRuntime(cfg *messaging.Config, logger *logging.Logger, workers int) (*messaging.Runtime, error) {
 	if cfg == nil {
 		return nil, nil
@@ -249,6 +250,7 @@ func buildMessagingRuntime(cfg *messaging.Config, logger *logging.Logger, worker
 	})
 }
 
+// startMetricsServer starts the Prometheus exporter if configured.
 func startMetricsServer(b *broker.Broker, logger *logging.Logger, cfg metrics.Config) error {
 	if cfg.ListenAddr == "" {
 		return nil
@@ -267,6 +269,7 @@ func startMetricsServer(b *broker.Broker, logger *logging.Logger, cfg metrics.Co
 	return nil
 }
 
+// startBrokerListeners starts TCP/TLS listeners and aggregates errors.
 func startBrokerListeners(b *broker.Broker, logger *logging.Logger, addr string, tlsAddr string, tlsConfig *tls.Config) (<-chan error, error) {
 	errCh := make(chan error, 2)
 	started := 0
@@ -293,6 +296,7 @@ func startBrokerListeners(b *broker.Broker, logger *logging.Logger, addr string,
 	return errCh, nil
 }
 
+// parseLogLevel normalizes CLI strings into slog levels.
 func parseLogLevel(raw string) (slog.Level, error) {
 	switch strings.ToLower(raw) {
 	case "trace":
@@ -310,6 +314,7 @@ func parseLogLevel(raw string) (slog.Level, error) {
 	}
 }
 
+// buildTLSConfig loads TLS certificates when both paths are provided.
 func buildTLSConfig(certPath, keyPath string) (*tls.Config, error) {
 	if certPath == "" && keyPath == "" {
 		return nil, nil
