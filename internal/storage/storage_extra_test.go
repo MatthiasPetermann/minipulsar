@@ -264,6 +264,49 @@ func TestPruneStaleSubscriptions(t *testing.T) {
 	}
 }
 
+func TestSubscriptionBacklogIncludesPending(t *testing.T) {
+	store := openExtraTestStore(t)
+	topic := "persistent://public/default/backlog-pending-test"
+	sub := "sub"
+
+	if err := store.EnsureSubscription(topic, sub, InitialPositionEarliest, SubscriptionTypeShared); err != nil {
+		t.Fatalf("ensure subscription: %v", err)
+	}
+
+	for i := 0; i < 3; i++ {
+		msg := Message{
+			Topic:   topic,
+			Payload: []byte("payload"),
+		}
+		if err := store.InsertMessage(&msg); err != nil {
+			t.Fatalf("insert message: %v", err)
+		}
+	}
+
+	batch, err := store.ClaimBatch(topic, sub, 1, 2)
+	if err != nil {
+		t.Fatalf("claim batch: %v", err)
+	}
+	if len(batch) != 2 {
+		t.Fatalf("expected 2 messages claimed, got %d", len(batch))
+	}
+
+	stats, err := store.SubscriptionBacklogStats("persistent://public/default", 10)
+	if err != nil {
+		t.Fatalf("subscription backlog stats: %v", err)
+	}
+
+	var backlog int
+	for _, stat := range stats {
+		if stat.Topic == topic && stat.Subscription == sub {
+			backlog = stat.BacklogCount
+		}
+	}
+	if backlog != 3 {
+		t.Fatalf("expected backlog 3 (pending + undelivered), got %d", backlog)
+	}
+}
+
 func TestEnsureSubscriptionReplacesOrphanedCursor(t *testing.T) {
 	store := openExtraTestStore(t)
 	topic := "persistent://public/default/orphaned-cursor-test"
