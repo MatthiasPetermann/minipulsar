@@ -40,6 +40,8 @@ func main() {
 	metricsInterval := flag.Duration("metrics-interval", 5*time.Second, "interval between metrics collection")
 	metricsTopTopics := flag.Int("metrics-top-topics", 10, "number of top topics to export metrics for")
 	namespaceMaintenanceInterval := flag.Duration("namespace-maintenance-interval", 30*time.Second, "interval between namespace maintenance sweeps")
+	ackTimeout := flag.Duration("ack-timeout", 0, "ack timeout for redelivery of unacked messages (0 to disable)")
+	ackTimeoutCheckInterval := flag.Duration("ack-timeout-check-interval", 30*time.Second, "interval between ack timeout scans")
 	jwtSecret := flag.String("jwt-secret", os.Getenv("MINIPULSAR_JWT_SECRET"), "shared secret for HS256 JWT verification (or set MINIPULSAR_JWT_SECRET)")
 	readTimeout := flag.Duration("read-timeout", 15*time.Second, "maximum time allowed to read a frame from a client (0 to disable)")
 	writeTimeout := flag.Duration("write-timeout", 15*time.Second, "maximum time allowed to write a frame to a client (0 to disable)")
@@ -133,6 +135,8 @@ func main() {
 			ReadTimeout:                  *readTimeout,
 			WriteTimeout:                 *writeTimeout,
 			NamespaceMaintenanceInterval: *namespaceMaintenanceInterval,
+			AckTimeout:                   *ackTimeout,
+			AckTimeoutCheckInterval:      *ackTimeoutCheckInterval,
 		})
 		if err := startMetricsServer(b, logger, metrics.Config{
 			Logger:         logger.With("component", "metrics"),
@@ -159,6 +163,8 @@ func main() {
 			"read_timeout", readTimeout.String(),
 			"write_timeout", writeTimeout.String(),
 			"namespace_maintenance_interval", namespaceMaintenanceInterval.String(),
+			"ack_timeout", ackTimeout.String(),
+			"ack_timeout_check_interval", ackTimeoutCheckInterval.String(),
 		)
 
 		program := tui.NewProgram(b, logCh, logLevelVar, level)
@@ -199,6 +205,8 @@ func main() {
 		ReadTimeout:                  *readTimeout,
 		WriteTimeout:                 *writeTimeout,
 		NamespaceMaintenanceInterval: *namespaceMaintenanceInterval,
+		AckTimeout:                   *ackTimeout,
+		AckTimeoutCheckInterval:      *ackTimeoutCheckInterval,
 	})
 	if err := startMetricsServer(b, logger, metrics.Config{
 		Logger:         logger.With("component", "metrics"),
@@ -225,6 +233,8 @@ func main() {
 		"read_timeout", readTimeout.String(),
 		"write_timeout", writeTimeout.String(),
 		"namespace_maintenance_interval", namespaceMaintenanceInterval.String(),
+		"ack_timeout", ackTimeout.String(),
+		"ack_timeout_check_interval", ackTimeoutCheckInterval.String(),
 	)
 
 	errCh, err := startBrokerListeners(b, logger, *addr, *tlsAddr, tlsConfig)

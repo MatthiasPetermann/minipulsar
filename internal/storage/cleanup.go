@@ -271,6 +271,98 @@ func (s *Store) PruneOrphanedSubscriptionData(namespace string) (int64, int64, e
 	return cursorCount, pendingCount, nil
 }
 
+// ExpirePendingBefore requeues pending messages older than the cutoff for redelivery.
+// It returns the number of pending rows cleared and the subscriptions affected.
+func (s *Store) ExpirePendingBefore(cutoff time.Time) (int64, []SubscriptionRef, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	rows, err := tx.Query(
+		`SELECT p.topic_id, p.name, MIN(p.message_id) AS min_id, t.full_name
+		 FROM subscription_pending p
+		 JOIN topics t ON t.id = p.topic_id
+		 WHERE p.delivered_at < ?
+		 GROUP BY p.topic_id, p.name`,
+		cutoff.UnixMilli(),
+	)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer rows.Close()
+
+	type pendingGroup struct {
+		topicID int64
+		sub     string
+		minID   int64
+		topic   string
+	}
+	var groups []pendingGroup
+	for rows.Next() {
+		var g pendingGroup
+		if err := rows.Scan(&g.topicID, &g.sub, &g.minID, &g.topic); err != nil {
+			return 0, nil, err
+		}
+		groups = append(groups, g)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, nil, err
+	}
+
+	var cleared int64
+	var subs []SubscriptionRef
+	for _, group := range groups {
+		if _, err := tx.Exec(
+			"INSERT OR IGNORE INTO subscription_cursor(topic_id, name, next_message_id) VALUES(?, ?, 1)",
+			group.topicID, group.sub,
+		); err != nil {
+			return 0, nil, err
+		}
+
+		var cur int64
+		if err := tx.QueryRow(
+			"SELECT next_message_id FROM subscription_cursor WHERE topic_id=? AND name=?",
+			group.topicID, group.sub,
+		).Scan(&cur); err != nil {
+			return 0, nil, err
+		}
+
+		res, err := tx.Exec(
+			"DELETE FROM subscription_pending WHERE topic_id=? AND name=? AND delivered_at < ?",
+			group.topicID, group.sub, cutoff.UnixMilli(),
+		)
+		if err != nil {
+			return 0, nil, err
+		}
+		affected, err := res.RowsAffected()
+		if err != nil {
+			return 0, nil, err
+		}
+		if affected == 0 {
+			continue
+		}
+
+		cleared += affected
+		if group.minID > 0 && (cur == 0 || group.minID < cur) {
+			if _, err := tx.Exec(
+				"UPDATE subscription_cursor SET next_message_id=? WHERE topic_id=? AND name=?",
+				group.minID, group.topicID, group.sub,
+			); err != nil {
+				return 0, nil, err
+			}
+		}
+
+		subs = append(subs, SubscriptionRef{Topic: group.topic, Subscription: group.sub})
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, nil, err
+	}
+	return cleared, subs, nil
+}
+
 // scanSubscriptionCursor reads the next_message_id for a subscription cursor.
 func scanSubscriptionCursor(db *sql.DB, sub string) (int64, error) {
 	var nextID int64

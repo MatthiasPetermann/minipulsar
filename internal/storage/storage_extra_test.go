@@ -229,6 +229,118 @@ func TestAckIndividualRespectsConsumerID(t *testing.T) {
 	}
 }
 
+func TestAckCumulativeClearsPendingUpToMessage(t *testing.T) {
+	store := openExtraTestStore(t)
+	topic := "persistent://public/default/ack-cumulative-test"
+	sub := "sub"
+
+	if err := store.EnsureSubscription(topic, sub, InitialPositionEarliest, SubscriptionTypeExclusive); err != nil {
+		t.Fatalf("ensure subscription: %v", err)
+	}
+
+	for i := 0; i < 3; i++ {
+		msg := Message{
+			Topic:   topic,
+			Payload: []byte("payload"),
+		}
+		if err := store.InsertMessage(&msg); err != nil {
+			t.Fatalf("insert message: %v", err)
+		}
+	}
+
+	batch, err := store.ClaimBatch(topic, sub, 1, 3)
+	if err != nil {
+		t.Fatalf("claim batch: %v", err)
+	}
+	if len(batch) != 3 {
+		t.Fatalf("expected 3 messages claimed, got %d", len(batch))
+	}
+
+	if err := store.AckCumulative(topic, sub, 1, batch[1].ID); err != nil {
+		t.Fatalf("ack cumulative: %v", err)
+	}
+
+	var pending int
+	if err := store.db.QueryRow(
+		"SELECT COUNT(*) FROM subscription_pending WHERE name=?",
+		sub,
+	).Scan(&pending); err != nil {
+		t.Fatalf("count pending: %v", err)
+	}
+	if pending != 1 {
+		t.Fatalf("expected 1 pending message remaining, got %d", pending)
+	}
+}
+
+func TestExpirePendingBeforeRequeuesMessages(t *testing.T) {
+	store := openExtraTestStore(t)
+	topic := "persistent://public/default/ack-timeout-test"
+	sub := "sub"
+
+	if err := store.EnsureSubscription(topic, sub, InitialPositionEarliest, SubscriptionTypeShared); err != nil {
+		t.Fatalf("ensure subscription: %v", err)
+	}
+
+	msg := Message{
+		Topic:   topic,
+		Payload: []byte("payload"),
+	}
+	if err := store.InsertMessage(&msg); err != nil {
+		t.Fatalf("insert message: %v", err)
+	}
+
+	batch, err := store.ClaimBatch(topic, sub, 1, 1)
+	if err != nil {
+		t.Fatalf("claim batch: %v", err)
+	}
+	if len(batch) != 1 {
+		t.Fatalf("expected 1 message claimed, got %d", len(batch))
+	}
+
+	var topicID int64
+	if err := store.db.QueryRow(
+		"SELECT id FROM topics WHERE full_name=?",
+		topic,
+	).Scan(&topicID); err != nil {
+		t.Fatalf("lookup topic id: %v", err)
+	}
+
+	expiredAt := time.Now().Add(-2 * time.Hour).UnixMilli()
+	if _, err := store.db.Exec(
+		"UPDATE subscription_pending SET delivered_at=? WHERE topic_id=? AND name=?",
+		expiredAt, topicID, sub,
+	); err != nil {
+		t.Fatalf("expire pending: %v", err)
+	}
+
+	cleared, subs, err := store.ExpirePendingBefore(time.Now().Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("expire pending before: %v", err)
+	}
+	if cleared != 1 {
+		t.Fatalf("expected 1 pending cleared, got %d", cleared)
+	}
+	if len(subs) != 1 || subs[0].Topic != topic || subs[0].Subscription != sub {
+		t.Fatalf("unexpected subscriptions affected: %+v", subs)
+	}
+
+	nextID, err := scanSubscriptionCursor(store.db, sub)
+	if err != nil {
+		t.Fatalf("query cursor: %v", err)
+	}
+	if nextID != batch[0].ID {
+		t.Fatalf("expected cursor reset to %d, got %d", batch[0].ID, nextID)
+	}
+
+	redeliver, err := store.ClaimBatch(topic, sub, 2, 1)
+	if err != nil {
+		t.Fatalf("claim batch after expire: %v", err)
+	}
+	if len(redeliver) != 1 || redeliver[0].ID != batch[0].ID {
+		t.Fatalf("expected message %d to be redelivered, got %+v", batch[0].ID, redeliver)
+	}
+}
+
 func TestPruneStaleSubscriptions(t *testing.T) {
 	store := openExtraTestStore(t)
 	topic := "persistent://public/default/stale-test"
