@@ -59,6 +59,9 @@ This design ensures:
 - Messages are delivered in order per subscription.
 - Shared subscription consumers do not double-deliver messages.
 - Pending rows are the source of truth for acknowledgements.
+- Pending rows are created when a batch is claimed, before the broker writes
+  messages to the consumer. Throttling or disconnects can therefore leave a
+  temporary pending backlog until ACKs arrive or the consumer is removed.
 
 ## Acknowledgements
 

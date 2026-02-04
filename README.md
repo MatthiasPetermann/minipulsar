@@ -17,6 +17,7 @@ Pulsar semantics on edge devices or constrained environments.
 - **Persistent + non-persistent topics** with a SQLite-backed log.
 - **JWT auth + HCL policies** for explicit access control.
 - **Prometheus metrics** and optional synthwave TUI dashboard.
+- **TUI controls** for pausing ingress/delivery and adding throttle delay.
 
 ---
 
@@ -187,7 +188,7 @@ Subscription start positions are driven by the Pulsar `SUBSCRIBE` command (`init
 - Messaging control plane (HCL) with Lua functions and bindings
 - Namespace policies for subscription timeouts and orphaned message retention
 - Prometheus metrics endpoint
-- Optional synthwave TUI dashboard
+- Optional synthwave TUI dashboard with pause + throttle controls
 
 ### Observability notes
 

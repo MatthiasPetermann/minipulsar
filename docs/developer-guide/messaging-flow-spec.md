@@ -110,6 +110,10 @@ Broker                        Storage
 - Claimed messages are recorded in the pending table to prevent duplicate
   delivery across consumers.
 - The broker decrements permits as messages are sent.
+- Pending rows are inserted **before** a message is written to the consumer
+  connection. This means a message can appear as pending even if delivery is
+  delayed by throttling or interrupted by a disconnect. Pending entries are
+  cleared on ACK or when the owning consumer disconnects.
 
 ### ACK flow
 
