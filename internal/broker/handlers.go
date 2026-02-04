@@ -513,14 +513,28 @@ func (b *Broker) handleAck(conn net.Conn, base *pulsar.BaseCommand) error {
 		}
 
 	case pulsar.CommandAck_Cumulative:
-		// Shared semantics: cumulative ack is not meaningful and breaks correctness.
-		// We ignore it (or you could treat it as Individual for the given id only).
-		b.cfg.Logger.Warn("ACK cumulative ignored (shared)",
-			"consumer_id", consumerID,
-			"topic", topic,
-			"subscription", sub,
-		)
-		return nil
+		if c.subType == pulsar.CommandSubscribe_Shared {
+			// Shared semantics: cumulative ack is not meaningful and breaks correctness.
+			b.cfg.Logger.Warn("ACK cumulative ignored (shared)",
+				"consumer_id", consumerID,
+				"topic", topic,
+				"subscription", sub,
+			)
+			return nil
+		}
+		var maxID int64
+		for _, mid := range ids {
+			entry := int64(mid.GetEntryId())
+			if entry > maxID {
+				maxID = entry
+			}
+		}
+		if maxID == 0 {
+			return nil
+		}
+		if err := b.store.AckCumulative(topic, sub, c.uid, maxID); err != nil {
+			return err
+		}
 
 	default:
 		b.cfg.Logger.Warn("ACK unsupported type",

@@ -178,12 +178,13 @@ Subscription start positions are driven by the Pulsar `SUBSCRIBE` command (`init
   - `SEND` / `SEND_RECEIPT`
   - `SUBSCRIBE` / `SUCCESS`
   - `FLOW` / `MESSAGE`
-  - `ACK` (individual ack only)
+  - `ACK` (individual + cumulative for exclusive/failover)
   - `PING` / `PONG`
 - Persistence:
   - SQLite log per topic
   - Subscription cursors + pending delivery tracking
-  - Subscription delivery types: Exclusive, Shared (round-robin), Failover (priority)
+- Subscription delivery types: Exclusive, Shared (round-robin), Failover (priority)
+- Ack timeout-based redelivery for unacked messages
 - Producer access modes: Shared, Exclusive, WaitForExclusive, ExclusiveWithFencing
 - Messaging control plane (HCL) with Lua functions and bindings
 - Namespace policies for subscription timeouts and orphaned message retention

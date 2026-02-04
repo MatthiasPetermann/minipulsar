@@ -43,6 +43,10 @@ type Config struct {
 	WriteTimeout time.Duration
 	// NamespaceMaintenanceInterval controls how often namespace maintenance runs.
 	NamespaceMaintenanceInterval time.Duration
+	// AckTimeout controls how long pending messages can remain unacked before redelivery.
+	AckTimeout time.Duration
+	// AckTimeoutCheckInterval controls how often to scan for expired pending messages.
+	AckTimeoutCheckInterval time.Duration
 }
 
 // producerKey scopes producer identifiers by connection to avoid collisions
@@ -192,6 +196,7 @@ func New(store *storage.Store, cfg Config) *Broker {
 		connRoles:        make(map[net.Conn][]string),
 	}
 	b.startNamespaceMaintenance()
+	b.startAckTimeoutMonitor()
 	return b
 }
 

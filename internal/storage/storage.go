@@ -298,6 +298,33 @@ func (s *Store) AckIndividual(topicName, sub string, consumerUID int64, ids []in
 	return tx.Commit()
 }
 
+// AckCumulative clears pending entries up to the provided message ID for a consumer.
+// It models Pulsar's cumulative acknowledgment behavior for exclusive/failover subscriptions.
+func (s *Store) AckCumulative(topicName, sub string, consumerUID int64, maxID int64) error {
+	topicID, err := s.lookupTopicID(topicName)
+	if err != nil {
+		return err
+	}
+	if topicID == 0 {
+		return nil
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.Exec(
+		"DELETE FROM subscription_pending WHERE topic_id=? AND name=? AND consumer_id=? AND message_id<=?",
+		topicID, sub, consumerUID, maxID,
+	); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
 // DropPendingByConsumer removes all pending entries for a consumer.
 // This is invoked when connections close so other consumers can progress.
 func (s *Store) DropPendingByConsumer(topicName, sub string, consumerUID int64) error {

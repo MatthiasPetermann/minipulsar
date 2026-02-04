@@ -123,8 +123,16 @@ Consumer                     Broker                     Storage
    |                           | -- delete pending ----> |
 ```
 
-- Only **individual** ACKs are supported; cumulative ACKs are ignored.
+- **Individual** ACKs are supported for all subscription types.
+- **Cumulative** ACKs are supported for Exclusive and Failover subscriptions
+  and ignored for Shared subscriptions.
 - Acknowledging removes the pending record for the consumer UID + message ID.
+
+### Ack timeout redelivery
+
+When an ack timeout is configured, a background sweep clears expired pending
+entries and rewinds the subscription cursor so the messages can be claimed and
+redelivered.
 
 ## Consumer flow (non-persistent topic)
 

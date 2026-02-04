@@ -67,8 +67,12 @@ This design ensures:
 
 - `AckIndividual` removes pending rows for a specific consumer UID and message
   IDs (used by `ACK` commands).
+- `AckCumulative` removes pending rows up to a message ID for a specific
+  consumer UID (used by cumulative `ACK` in exclusive/failover).
 - `DropPendingByConsumer` clears all pending rows for a consumer when a
   connection closes.
+- `ExpirePendingBefore` clears expired pending rows and rewinds cursors so
+  messages can be redelivered when an ack timeout is configured.
 
 ## Retention and cleanup
 

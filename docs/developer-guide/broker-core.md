@@ -68,9 +68,16 @@ Supported commands include `CONNECT`, `PRODUCER`, `SEND`, `SUBSCRIBE`, `FLOW`,
   when permits become available.
 
 ### ACK
-- Supports **individual ack** for shared subscriptions. (Cumulative ack is
-  ignored to preserve correctness in shared mode.)
+- Supports **individual ack** for all subscription types.
+- Supports **cumulative ack** for Exclusive and Failover subscriptions; cumulative
+  ack is ignored in Shared mode to preserve correctness.
 - Acknowledgement removes pending rows for the consumer UID and message IDs.
+
+### Ack timeout + redelivery
+
+When an ack timeout is configured, the broker periodically scans pending
+messages. Expired pending entries are cleared and the subscription cursor is
+rewound so the messages can be redelivered.
 
 ### CLOSE_PRODUCER / CLOSE_CONSUMER
 - Remove producer/consumer state and clear pending messages for the consumer.
