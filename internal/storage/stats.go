@@ -118,14 +118,23 @@ func (s *Store) SubscriptionBacklogStats(namespace string, limit int) ([]Subscri
 	rows, err := s.db.Query(
 		`SELECT t.full_name,
 			s.name,
-			COUNT(m.id) AS backlog_count
+			COALESCE(p.pending_count, 0) + COALESCE(SUM(CASE WHEN sp.message_id IS NULL THEN 1 ELSE 0 END), 0) AS backlog_count
 		 FROM subscriptions s
 		 JOIN topics t ON t.id = s.topic_id
 		 JOIN namespaces n ON n.id = t.namespace_id
 		 JOIN subscription_cursor c ON c.topic_id = s.topic_id AND c.name = s.name
+		 LEFT JOIN (
+			SELECT topic_id, name, COUNT(*) AS pending_count
+			FROM subscription_pending
+			GROUP BY topic_id, name
+		 ) p ON p.topic_id = s.topic_id AND p.name = s.name
 		 LEFT JOIN messages m ON m.topic_id = t.id AND m.id >= c.next_message_id
+		 LEFT JOIN subscription_pending sp
+			ON sp.topic_id = s.topic_id
+		   AND sp.name = s.name
+		   AND sp.message_id = m.id
 		 WHERE n.tenant = ? AND n.name = ?
-		 GROUP BY t.full_name, s.name
+		 GROUP BY t.full_name, s.name, p.pending_count
 		 ORDER BY backlog_count DESC, t.full_name, s.name
 		 LIMIT ?`,
 		info.Tenant,
