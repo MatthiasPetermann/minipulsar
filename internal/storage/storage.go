@@ -2,6 +2,7 @@ package storage
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -18,6 +19,7 @@ type Message struct {
 	Payload     []byte
 	SequenceID  uint64
 	PublishTime int64
+	Properties  map[string]string
 }
 
 // Store wraps the SQLite database connection used for durability.
@@ -86,6 +88,7 @@ CREATE TABLE IF NOT EXISTS messages (
   payload BLOB NOT NULL,
   publish_time INTEGER NOT NULL,
   sequence_id INTEGER NOT NULL,
+  properties TEXT NOT NULL DEFAULT '{}',
   FOREIGN KEY (topic_id) REFERENCES topics(id)
 );
 
@@ -135,6 +138,9 @@ CREATE INDEX IF NOT EXISTS idx_topics_by_namespace
 		return err
 	}
 	if err := addColumnIfMissing(s.db, "subscriptions", "last_consumer_at", "ALTER TABLE subscriptions ADD COLUMN last_consumer_at INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := addColumnIfMissing(s.db, "messages", "properties", "ALTER TABLE messages ADD COLUMN properties TEXT NOT NULL DEFAULT '{}'"); err != nil {
 		return err
 	}
 	return nil
@@ -244,9 +250,13 @@ func (s *Store) InsertMessage(msg *Message) error {
 		return err
 	}
 
+	properties, err := encodeProperties(msg.Properties)
+	if err != nil {
+		return err
+	}
 	res, err := tx.Exec(
-		"INSERT INTO messages(topic_id, payload, publish_time, sequence_id) VALUES(?, ?, ?, ?)",
-		topicID, msg.Payload, msg.PublishTime, msg.SequenceID,
+		"INSERT INTO messages(topic_id, payload, publish_time, sequence_id, properties) VALUES(?, ?, ?, ?, ?)",
+		topicID, msg.Payload, msg.PublishTime, msg.SequenceID, properties,
 	)
 	if err != nil {
 		return err
@@ -396,7 +406,7 @@ func (s *Store) ClaimBatch(topicName, sub string, consumerUID int64, limit int) 
 
 	// Select deliverable messages (not already pending).
 	rows, err := tx.Query(
-		`SELECT m.id, t.full_name, m.payload, m.publish_time, m.sequence_id
+		`SELECT m.id, t.full_name, m.payload, m.publish_time, m.sequence_id, m.properties
 		 FROM messages m
 		 JOIN topics t ON t.id = m.topic_id
 		 WHERE m.topic_id = ?
@@ -420,9 +430,15 @@ func (s *Store) ClaimBatch(topicName, sub string, consumerUID int64, limit int) 
 
 	for rows.Next() {
 		var m Message
-		if err := rows.Scan(&m.ID, &m.Topic, &m.Payload, &m.PublishTime, &m.SequenceID); err != nil {
+		var rawProperties string
+		if err := rows.Scan(&m.ID, &m.Topic, &m.Payload, &m.PublishTime, &m.SequenceID, &rawProperties); err != nil {
 			return nil, err
 		}
+		properties, err := decodeProperties(rawProperties)
+		if err != nil {
+			return nil, err
+		}
+		m.Properties = properties
 		lastSeenID = m.ID
 
 		// Insert pending (guarantees no other consumer can claim it later).
@@ -462,6 +478,31 @@ func (s *Store) ClaimBatch(topicName, sub string, consumerUID int64, limit int) 
 		return nil, err
 	}
 	return res, nil
+}
+
+func encodeProperties(properties map[string]string) (string, error) {
+	if len(properties) == 0 {
+		return "{}", nil
+	}
+	encoded, err := json.Marshal(properties)
+	if err != nil {
+		return "", err
+	}
+	return string(encoded), nil
+}
+
+func decodeProperties(raw string) (map[string]string, error) {
+	if raw == "" || raw == "{}" {
+		return nil, nil
+	}
+	var decoded map[string]string
+	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
+		return nil, err
+	}
+	if len(decoded) == 0 {
+		return nil, nil
+	}
+	return decoded, nil
 }
 
 // lookupTopicID resolves a topic name to its database ID.

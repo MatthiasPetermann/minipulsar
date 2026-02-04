@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -94,6 +95,11 @@ func TestClaimBatchAndAckIndividual(t *testing.T) {
 			Topic:      topicName,
 			Payload:    []byte{byte('a' + i)},
 			SequenceID: uint64(i + 1),
+			Properties: map[string]string{
+				"trace":  "abc",
+				"index":  fmt.Sprintf("%d", i),
+				"source": "test",
+			},
 		}); err != nil {
 			t.Fatalf("insert message %d: %v", i, err)
 		}
@@ -105,6 +111,17 @@ func TestClaimBatchAndAckIndividual(t *testing.T) {
 	}
 	if len(batch) != 2 {
 		t.Fatalf("unexpected batch length: %d", len(batch))
+	}
+	for _, msg := range batch {
+		if msg.Properties["trace"] != "abc" {
+			t.Fatalf("unexpected properties trace: %q", msg.Properties["trace"])
+		}
+		if msg.Properties["source"] != "test" {
+			t.Fatalf("unexpected properties source: %q", msg.Properties["source"])
+		}
+		if msg.Properties["index"] == "" {
+			t.Fatalf("missing properties index")
+		}
 	}
 
 	var pendingCount int
