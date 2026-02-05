@@ -219,15 +219,14 @@ func (b *Broker) handleSubscribe(conn net.Conn, base *pulsar.BaseCommand) error 
 
 	key := consumerKey{conn: conn, id: consumerID}
 
-	// Register consumer (scoped to this conn).
+	// Remove any existing consumer with the same key.
 	b.mu.Lock()
 	if old := b.consumers[key]; old != nil {
 		b.mu.Unlock()
 		b.removeConsumer(key)
-		b.mu.Lock()
+	} else {
+		b.mu.Unlock()
 	}
-	b.consumers[key] = c
-	b.mu.Unlock()
 
 	// Attach to subscription state.
 	s, err := b.getOrCreateSubState(topicInfo.FullName, sub, topicInfo.Persistent, subType)
@@ -241,6 +240,11 @@ func (b *Broker) handleSubscribe(conn net.Conn, base *pulsar.BaseCommand) error 
 	}
 	s.consumers = append(s.consumers, c)
 	s.mu.Unlock()
+
+	// Register consumer (scoped to this conn) after validating subscription.
+	b.mu.Lock()
+	b.consumers[key] = c
+	b.mu.Unlock()
 
 	b.cfg.Logger.Info("SUBSCRIBE",
 		"consumer_id", consumerID,

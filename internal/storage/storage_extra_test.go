@@ -591,3 +591,48 @@ func TestPruneConsumedMessages(t *testing.T) {
 		t.Fatalf("expected 1 message to remain, got %d", count)
 	}
 }
+
+func TestPruneConsumedMessagesSkipsPending(t *testing.T) {
+	store := openExtraTestStore(t)
+	topic := "persistent://public/default/consumed-retention-pending"
+
+	if err := store.EnsureSubscription(topic, "sub", InitialPositionEarliest, SubscriptionTypeShared); err != nil {
+		t.Fatalf("ensure subscription: %v", err)
+	}
+
+	oldTime := time.Now().Add(-2 * time.Hour).UnixMilli()
+	msg := Message{
+		Topic:       topic,
+		Payload:     []byte("payload-pending"),
+		PublishTime: oldTime,
+	}
+	if err := store.InsertMessage(&msg); err != nil {
+		t.Fatalf("insert message: %v", err)
+	}
+
+	batch, err := store.ClaimBatch(topic, "sub", 1, 1)
+	if err != nil {
+		t.Fatalf("claim batch: %v", err)
+	}
+	if len(batch) != 1 {
+		t.Fatalf("expected 1 message claimed, got %d", len(batch))
+	}
+
+	deleted, err := store.PruneConsumedMessages("persistent://public/default", time.Now().Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("prune consumed messages: %v", err)
+	}
+	if deleted != 0 {
+		t.Fatalf("expected 0 messages deleted, got %d", deleted)
+	}
+
+	var count int
+	if err := store.db.QueryRow(
+		"SELECT COUNT(*) FROM messages",
+	).Scan(&count); err != nil {
+		t.Fatalf("count messages: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected pending message to remain, got %d", count)
+	}
+}

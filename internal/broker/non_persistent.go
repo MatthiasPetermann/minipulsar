@@ -25,7 +25,7 @@ func (b *Broker) deliverNonPersistent(topic string, msg storage.Message) {
 
 	for _, s := range subs {
 		s.mu.Lock()
-		c := s.nextConsumerWithPermits()
+		c := s.selectConsumerWithPermits()
 		s.mu.Unlock()
 		if c == nil {
 			continue
