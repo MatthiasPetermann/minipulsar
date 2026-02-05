@@ -140,6 +140,11 @@ func (s *Store) PruneConsumedMessages(namespace string, cutoff time.Time) (int64
 			  WHERE n.tenant = ? AND n.name = ?
 			    AND EXISTS (SELECT 1 FROM subscriptions s WHERE s.topic_id = t.id)
 		   )
+		   AND NOT EXISTS (
+			 SELECT 1 FROM subscription_pending p
+			  WHERE p.topic_id = messages.topic_id
+			    AND p.message_id = messages.id
+		   )
 		   AND id < (
 			 SELECT MIN(c.next_message_id)
 			   FROM subscription_cursor c
