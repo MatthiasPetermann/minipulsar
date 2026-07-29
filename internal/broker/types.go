@@ -1,6 +1,7 @@
 package broker
 
 import (
+	"context"
 	"crypto/tls"
 	"log/slog"
 	"net"
@@ -47,6 +48,12 @@ type Config struct {
 	AckTimeout time.Duration
 	// AckTimeoutCheckInterval controls how often to scan for expired pending messages.
 	AckTimeoutCheckInterval time.Duration
+	// MaxConnections rejects excess concurrent TCP connections. Zero disables the limit.
+	MaxConnections int
+	// MaxProducers rejects producer creation above the broker-wide limit. Zero disables the limit.
+	MaxProducers int
+	// MaxConsumers rejects consumer creation above the broker-wide limit. Zero disables the limit.
+	MaxConsumers int
 }
 
 // producerKey scopes producer identifiers by connection to avoid collisions
@@ -99,6 +106,13 @@ type Broker struct {
 
 	throttleDelay  atomic.Int64
 	throttlePaused atomic.Bool
+
+	lifecycleCtx    context.Context
+	lifecycleCancel context.CancelFunc
+	lifecycleWG     sync.WaitGroup
+	shutdownOnce    sync.Once
+	listeners       map[net.Listener]struct{}
+	connections     map[net.Conn]struct{}
 }
 
 // producer represents a logical producer created by a client connection.
@@ -185,6 +199,7 @@ func New(store *storage.Store, cfg Config) *Broker {
 	}
 	cfg.Logger = logger
 
+	lifecycleCtx, lifecycleCancel := context.WithCancel(context.Background())
 	b := &Broker{
 		store:            store,
 		cfg:              cfg,
@@ -194,6 +209,10 @@ func New(store *storage.Store, cfg Config) *Broker {
 		subs:             make(map[subKey]*subState),
 		nonPersistentSeq: make(map[string]uint64),
 		connRoles:        make(map[net.Conn][]string),
+		lifecycleCtx:     lifecycleCtx,
+		lifecycleCancel:  lifecycleCancel,
+		listeners:        make(map[net.Listener]struct{}),
+		connections:      make(map[net.Conn]struct{}),
 	}
 	b.startNamespaceMaintenance()
 	b.startAckTimeoutMonitor()

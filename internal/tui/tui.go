@@ -51,16 +51,21 @@ type model struct {
 
 	delayLevel int
 	paused     bool
+	followLogs bool
+	startedAt  time.Time
+	updatedAt  time.Time
 }
 
 // NewProgram builds a Bubble Tea program that renders broker stats and logs.
 func NewProgram(b *broker.Broker, logCh <-chan string, levelVar *slog.LevelVar, level slog.Level) *tea.Program {
 	m := model{
-		broker:   b,
-		logCh:    logCh,
-		level:    levelVar,
-		logLevel: level,
-		paused:   b.ThrottlePaused(),
+		broker:     b,
+		logCh:      logCh,
+		level:      levelVar,
+		logLevel:   level,
+		paused:     b.ThrottlePaused(),
+		followLogs: true,
+		startedAt:  time.Now(),
 	}
 	m.delayLevel = b.ThrottleLevel()
 	return tea.NewProgram(m, tea.WithAltScreen())
@@ -107,6 +112,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case statsMsg:
 		m.stats = msg.stats
 		m.err = msg.err
+		m.updatedAt = time.Now()
 		return m, nil
 	case logMsg:
 		if !msg.ok {
@@ -117,7 +123,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.logs = m.logs[len(m.logs)-logBufferMax:]
 		}
 		m.viewport.SetContent(strings.Join(m.logs, "\n"))
-		m.viewport.GotoBottom()
+		if m.followLogs {
+			m.viewport.GotoBottom()
+		}
 		return m, waitForLog(m.logCh)
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -129,6 +137,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.rotateDelayLevel()
 		case " ":
 			m.togglePause()
+		case "f":
+			m.followLogs = !m.followLogs
+			if m.followLogs {
+				m.viewport.GotoBottom()
+			}
+		case "c":
+			m.logs = nil
+			m.viewport.SetContent("")
 		case "up", "k":
 			m.viewport.LineUp(1)
 		case "down", "j":
@@ -209,23 +225,28 @@ func (m model) View() string {
 	styles := newStyles()
 
 	headerLine := styles.headerLine.Render(strings.Repeat("─", m.layout.totalWidth))
+	status := "LIVE"
+	if m.paused {
+		status = "PAUSED"
+	}
 	headerText := lipgloss.Place(
 		m.layout.totalWidth,
 		1,
 		lipgloss.Center,
 		lipgloss.Center,
-		styles.headerText.Render("Minipulsar"),
+		styles.headerText.Render(fmt.Sprintf("MINIPULSAR  /  %s  /  %.1f msg/s", status, m.stats.ThroughputPS)),
 	)
 	header := lipgloss.JoinVertical(lipgloss.Left, headerLine, headerText, headerLine)
-	stats := styles.box.Width(m.layout.statsWidth).Height(m.layout.topHeight).Render(renderOverview(m.stats, m.err))
+	stats := styles.box.Width(m.layout.statsWidth).Height(m.layout.topHeight).Render(renderOverview(m.stats, m.err, time.Since(m.startedAt)))
 	topics := styles.box.Width(m.layout.topicsWidth).Height(m.layout.topHeight).Render(renderTopTopics(m.stats, m.layout.topicsWidth-2))
 	row := lipgloss.JoinHorizontal(lipgloss.Top, stats, " ", topics)
 	logs := styles.box.Width(m.layout.totalWidth - 2).Height(m.layout.logHeight).Render(m.viewport.View())
 	help := styles.help.Render(fmt.Sprintf(
-		"q: quit • l: log level (%s) • d: delay (%ds) • space: pause (%s) • ↑/↓/pgup/pgdown scroll logs",
+		"q quit  l log:%s  d delay:%ds  space pause:%s  f follow:%s  c clear logs  ↑/↓/pgup/pgdown scroll",
 		logLevelLabel(m.logLevel),
 		m.delayLevel,
 		pauseLabel(m.paused),
+		pauseLabel(m.followLogs),
 	))
 
 	content := lipgloss.JoinVertical(lipgloss.Left, header, row, logs, help)
@@ -251,6 +272,8 @@ type styleSet struct {
 	label      lipgloss.Style
 	value      lipgloss.Style
 	bar        lipgloss.Style
+	warning    lipgloss.Style
+	success    lipgloss.Style
 }
 
 // newStyles defines the synthwave color palette and component styles.
@@ -278,21 +301,24 @@ func newStyles() styleSet {
 			Background(bg).
 			Bold(true).
 			Align(lipgloss.Center),
-		box:    box,
-		help:   lipgloss.NewStyle().Foreground(cyan).Padding(0, 1),
-		accent: lipgloss.NewStyle().Foreground(pink).Bold(true),
-		label:  lipgloss.NewStyle().Foreground(cyan),
-		value:  lipgloss.NewStyle().Foreground(text).Bold(true),
-		bar:    lipgloss.NewStyle().Foreground(pink),
+		box:     box,
+		help:    lipgloss.NewStyle().Foreground(cyan).Padding(0, 1),
+		accent:  lipgloss.NewStyle().Foreground(pink).Bold(true),
+		label:   lipgloss.NewStyle().Foreground(cyan),
+		value:   lipgloss.NewStyle().Foreground(text).Bold(true),
+		bar:     lipgloss.NewStyle().Foreground(pink),
+		warning: lipgloss.NewStyle().Foreground(lipgloss.Color("#FFB703")).Bold(true),
+		success: lipgloss.NewStyle().Foreground(lipgloss.Color("#80ED99")).Bold(true),
 	}
 }
 
 // renderOverview builds the left-hand stats panel.
-func renderOverview(stats broker.StatsSnapshot, err error) string {
+func renderOverview(stats broker.StatsSnapshot, err error, uptime time.Duration) string {
 	styles := newStyles()
 	lines := []string{
-		styles.accent.Render("Overview"),
+		styles.accent.Render("Broker Overview"),
 		"",
+		fmt.Sprintf("%s %s", styles.label.Render("Uptime"), styles.value.Render(formatDuration(uptime))),
 		fmt.Sprintf("%s %s", styles.label.Render("Producers"), styles.value.Render(fmt.Sprintf("%d", stats.Producers))),
 		fmt.Sprintf("%s %s", styles.label.Render("Consumers"), styles.value.Render(fmt.Sprintf("%d", stats.Consumers))),
 		fmt.Sprintf("%s %s", styles.label.Render("Topics"), styles.value.Render(fmt.Sprintf("%d", stats.Topics))),
@@ -310,7 +336,7 @@ func renderOverview(stats broker.StatsSnapshot, err error) string {
 // renderTopTopics builds the right-hand topic activity panel.
 func renderTopTopics(stats broker.StatsSnapshot, width int) string {
 	styles := newStyles()
-	lines := []string{styles.accent.Render("Top Topics"), ""}
+	lines := []string{styles.accent.Render("Top Topics / Backlog Pressure"), ""}
 
 	if len(stats.TopTopics) == 0 {
 		lines = append(lines, styles.label.Render("No topic activity yet."))
@@ -318,27 +344,54 @@ func renderTopTopics(stats broker.StatsSnapshot, width int) string {
 	}
 
 	metricWidth := 6
-	topicWidth := width - metricWidth*2 - 2
+	barWidth := 10
+	topicWidth := width - metricWidth*2 - barWidth - 3
 	if topicWidth < 10 {
 		topicWidth = 10
 	}
 
-	head := fmt.Sprintf("%-*s %*s %*s", topicWidth, "Topic", metricWidth, "Msgs", metricWidth, "Pend")
+	head := fmt.Sprintf("%-*s %*s %*s %s", topicWidth, "Topic", metricWidth, "Msgs", metricWidth, "Pend", "Pressure")
 	lines = append(lines, styles.label.Render(head))
 
 	for _, topic := range stats.TopTopics {
 		lines = append(lines, fmt.Sprintf(
-			"%-*s %*d %*d",
+			"%-*s %*d %*d %s",
 			topicWidth,
 			truncate(topic.Topic, topicWidth),
 			metricWidth,
 			topic.MessageCount,
 			metricWidth,
 			topic.PendingCount,
+			backlogBar(topic.PendingCount, topic.MessageCount, barWidth),
 		))
 	}
 
 	return strings.Join(lines, "\n")
+}
+
+func backlogBar(pending, messages, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	ratio := 0.0
+	if messages > 0 {
+		ratio = float64(pending) / float64(messages)
+	}
+	filled := int(math.Round(ratio * float64(width)))
+	if filled > width {
+		filled = width
+	}
+	return strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
+}
+
+func formatDuration(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	}
+	return fmt.Sprintf("%dh%02dm", int(d.Hours()), int(d.Minutes())%60)
 }
 
 // truncate shortens strings to fit in fixed-width columns.

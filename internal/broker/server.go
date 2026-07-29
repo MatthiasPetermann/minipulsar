@@ -1,7 +1,9 @@
 package broker
 
 import (
+	"context"
 	"crypto/tls"
+	"errors"
 	"io"
 	"net"
 	"sync"
@@ -31,15 +33,89 @@ func (b *Broker) ServeWithTLS(addr string, tlsConfig *tls.Config) error {
 	if err != nil {
 		return err
 	}
-	b.cfg.Logger.Info("minipulsar listening", "addr", addr, "tls", tlsConfig != nil)
+	return b.serveListener(ln, tlsConfig != nil)
+}
+
+func (b *Broker) serveListener(ln net.Listener, tlsEnabled bool) error {
+	b.mu.Lock()
+	b.listeners[ln] = struct{}{}
+	b.mu.Unlock()
+	defer func() {
+		b.mu.Lock()
+		delete(b.listeners, ln)
+		b.mu.Unlock()
+		_ = ln.Close()
+	}()
+
+	b.cfg.Logger.Info("minipulsar listening", "addr", ln.Addr(), "tls", tlsEnabled)
 
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
+			if b.lifecycleCtx.Err() != nil || errors.Is(err, net.ErrClosed) {
+				return nil
+			}
 			b.cfg.Logger.Warn("accept error", "err", err)
 			continue
 		}
-		go b.handleConnection(conn)
+		if b.lifecycleCtx.Err() != nil {
+			_ = conn.Close()
+			return nil
+		}
+		b.mu.Lock()
+		if b.lifecycleCtx.Err() != nil {
+			b.mu.Unlock()
+			_ = conn.Close()
+			return nil
+		}
+		if b.cfg.MaxConnections > 0 && len(b.connections) >= b.cfg.MaxConnections {
+			b.mu.Unlock()
+			b.cfg.Logger.Warn("connection limit reached", "limit", b.cfg.MaxConnections, "remote", conn.RemoteAddr())
+			_ = conn.Close()
+			continue
+		}
+		b.connections[conn] = struct{}{}
+		b.mu.Unlock()
+		b.lifecycleWG.Add(1)
+		go func() {
+			defer b.lifecycleWG.Done()
+			b.handleConnection(conn)
+		}()
+	}
+}
+
+// Shutdown stops listeners, closes active connections, and waits for broker work to finish.
+func (b *Broker) Shutdown(ctx context.Context) error {
+	b.shutdownOnce.Do(func() {
+		b.lifecycleCancel()
+		b.mu.RLock()
+		listeners := make([]net.Listener, 0, len(b.listeners))
+		for listener := range b.listeners {
+			listeners = append(listeners, listener)
+		}
+		connections := make([]net.Conn, 0, len(b.connections))
+		for conn := range b.connections {
+			connections = append(connections, conn)
+		}
+		b.mu.RUnlock()
+		for _, listener := range listeners {
+			_ = listener.Close()
+		}
+		for _, conn := range connections {
+			_ = conn.Close()
+		}
+	})
+
+	done := make(chan struct{})
+	go func() {
+		b.lifecycleWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 
@@ -101,6 +177,7 @@ func (b *Broker) cleanupConnection(conn net.Conn) {
 
 	b.mu.Lock()
 	delete(b.connRoles, conn)
+	delete(b.connections, conn)
 	b.mu.Unlock()
 
 	for _, k := range consumerKeys {

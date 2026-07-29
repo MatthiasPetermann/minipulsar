@@ -40,6 +40,9 @@ func TestEnsureSubscriptionCreatesCursor(t *testing.T) {
 func TestClaimBatchAdvancesCursorAndAckClearsPending(t *testing.T) {
 	store := openExtraTestStore(t)
 	topic := "persistent://public/default/test"
+	if err := store.EnsureSubscription(topic, "sub", InitialPositionEarliest, SubscriptionTypeShared); err != nil {
+		t.Fatalf("ensure subscription: %v", err)
+	}
 
 	for i := 0; i < 2; i++ {
 		msg := Message{
@@ -427,11 +430,17 @@ func TestEnsureSubscriptionReplacesOrphanedCursor(t *testing.T) {
 		t.Fatalf("ensure subscription: %v", err)
 	}
 
+	if _, err := store.db.Exec("PRAGMA foreign_keys = OFF"); err != nil {
+		t.Fatalf("disable foreign keys: %v", err)
+	}
 	if _, err := store.db.Exec(
 		"DELETE FROM subscriptions WHERE name=?",
 		"sub",
 	); err != nil {
 		t.Fatalf("delete subscription: %v", err)
+	}
+	if _, err := store.db.Exec("PRAGMA foreign_keys = ON"); err != nil {
+		t.Fatalf("enable foreign keys: %v", err)
 	}
 
 	if err := store.EnsureSubscription(topic, "sub", InitialPositionEarliest, SubscriptionTypeShared); err != nil {
@@ -466,6 +475,9 @@ func TestPruneOrphanedSubscriptionData(t *testing.T) {
 		t.Fatalf("lookup topic id: %v", err)
 	}
 
+	if _, err := store.db.Exec("PRAGMA foreign_keys = OFF"); err != nil {
+		t.Fatalf("disable foreign keys: %v", err)
+	}
 	if _, err := store.db.Exec(
 		"DELETE FROM subscriptions WHERE topic_id=? AND name=?",
 		topicID, "sub",
@@ -478,6 +490,9 @@ func TestPruneOrphanedSubscriptionData(t *testing.T) {
 		topicID, "sub", int64(101), int64(7), time.Now().UnixMilli(),
 	); err != nil {
 		t.Fatalf("insert orphaned pending: %v", err)
+	}
+	if _, err := store.db.Exec("PRAGMA foreign_keys = ON"); err != nil {
+		t.Fatalf("enable foreign keys: %v", err)
 	}
 
 	cursors, pending, err := store.PruneOrphanedSubscriptionData("persistent://public/default")

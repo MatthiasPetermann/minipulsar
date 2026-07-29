@@ -16,9 +16,17 @@ func (b *Broker) startNamespaceMaintenance() {
 	}
 
 	ticker := time.NewTicker(b.cfg.NamespaceMaintenanceInterval)
+	b.lifecycleWG.Add(1)
 	go func() {
-		for range ticker.C {
-			b.runNamespaceMaintenance()
+		defer b.lifecycleWG.Done()
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				b.runNamespaceMaintenance()
+			case <-b.lifecycleCtx.Done():
+				return
+			}
 		}
 	}()
 }

@@ -14,9 +14,17 @@ func (b *Broker) startAckTimeoutMonitor() {
 		interval = defaultAckTimeoutCheckInterval
 	}
 	ticker := time.NewTicker(interval)
+	b.lifecycleWG.Add(1)
 	go func() {
-		for range ticker.C {
-			b.expirePending()
+		defer b.lifecycleWG.Done()
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				b.expirePending()
+			case <-b.lifecycleCtx.Done():
+				return
+			}
 		}
 	}()
 }

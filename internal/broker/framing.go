@@ -84,6 +84,13 @@ func (b *Broker) handleFrame(conn net.Conn) error {
 		return b.handleCloseConsumer(conn, &base)
 	default:
 		b.cfg.Logger.Warn("unhandled command type", "type", base.GetType())
-		return nil
+		return b.writeCommand(conn, &pulsar.BaseCommand{
+			Type: pulsar.BaseCommand_ERROR.Enum(),
+			Error: &pulsar.CommandError{
+				RequestId: proto.Uint64(0),
+				Error:     pulsar.ServerError_UnsupportedVersionError.Enum(),
+				Message:   proto.String(fmt.Sprintf("unsupported command type %s", base.GetType())),
+			},
+		})
 	}
 }

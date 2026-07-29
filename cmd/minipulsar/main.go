@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"flag"
 	"fmt"
 	"log/slog"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -29,6 +32,9 @@ func main() {
 	serverVersion := flag.String("server-version", "minipulsar-0.1", "server version reported to Pulsar clients")
 	maxFrame := flag.Uint("max-frame", 10*1024*1024, "maximum inbound frame size in bytes")
 	maxMessage := flag.Int("max-message", 5*1024*1024, "maximum message size advertised to clients")
+	maxConnections := flag.Int("max-connections", 0, "maximum concurrent TCP connections (0 disables the limit)")
+	maxProducers := flag.Int("max-producers", 0, "maximum concurrent producers (0 disables the limit)")
+	maxConsumers := flag.Int("max-consumers", 0, "maximum concurrent consumers (0 disables the limit)")
 	logLevel := flag.String("log-level", "info", "log level (trace, debug, info, warn, error)")
 	logFormat := flag.String("log-format", "text", "log format (text or json)")
 	logTimestamp := flag.Bool("log-timestamp", true, "include timestamps in log output")
@@ -74,6 +80,7 @@ func main() {
 		logger.Error("init db schema", "err", err)
 		os.Exit(1)
 	}
+	defer store.DB().Close()
 
 	var messagingCfg *messaging.Config
 	if *messagingConfig != "" {
@@ -137,17 +144,22 @@ func main() {
 			NamespaceMaintenanceInterval: *namespaceMaintenanceInterval,
 			AckTimeout:                   *ackTimeout,
 			AckTimeoutCheckInterval:      *ackTimeoutCheckInterval,
+			MaxConnections:               *maxConnections,
+			MaxProducers:                 *maxProducers,
+			MaxConsumers:                 *maxConsumers,
 		})
-		if err := startMetricsServer(b, logger, metrics.Config{
+		metricsServer, err := startMetricsServer(b, logger, metrics.Config{
 			Logger:         logger.With("component", "metrics"),
 			ListenAddr:     *metricsAddr,
 			Path:           *metricsPath,
 			ScrapeInterval: *metricsInterval,
 			TopTopicsLimit: *metricsTopTopics,
-		}); err != nil {
+		})
+		if err != nil {
 			logger.Error("init metrics", "err", err)
 			os.Exit(1)
 		}
+		defer stopRuntime(b, metricsServer, logger)
 
 		logger.Info("starting minipulsar",
 			"addr", *addr,
@@ -207,17 +219,22 @@ func main() {
 		NamespaceMaintenanceInterval: *namespaceMaintenanceInterval,
 		AckTimeout:                   *ackTimeout,
 		AckTimeoutCheckInterval:      *ackTimeoutCheckInterval,
+		MaxConnections:               *maxConnections,
+		MaxProducers:                 *maxProducers,
+		MaxConsumers:                 *maxConsumers,
 	})
-	if err := startMetricsServer(b, logger, metrics.Config{
+	metricsServer, err := startMetricsServer(b, logger, metrics.Config{
 		Logger:         logger.With("component", "metrics"),
 		ListenAddr:     *metricsAddr,
 		Path:           *metricsPath,
 		ScrapeInterval: *metricsInterval,
 		TopTopicsLimit: *metricsTopTopics,
-	}); err != nil {
+	})
+	if err != nil {
 		logger.Error("init metrics", "err", err)
 		os.Exit(1)
 	}
+	defer stopRuntime(b, metricsServer, logger)
 
 	logger.Info("starting minipulsar",
 		"addr", *addr,
@@ -242,9 +259,17 @@ func main() {
 		logger.Error("listen", "err", err)
 		os.Exit(1)
 	}
-	if err := <-errCh; err != nil {
-		logger.Error("listen", "err", err)
-		os.Exit(1)
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(signals)
+	select {
+	case err := <-errCh:
+		if err != nil {
+			logger.Error("listen", "err", err)
+			os.Exit(1)
+		}
+	case sig := <-signals:
+		logger.Info("shutdown requested", "signal", sig)
 	}
 }
 
@@ -261,13 +286,13 @@ func buildMessagingRuntime(cfg *messaging.Config, logger *logging.Logger, worker
 }
 
 // startMetricsServer starts the Prometheus exporter if configured.
-func startMetricsServer(b *broker.Broker, logger *logging.Logger, cfg metrics.Config) error {
+func startMetricsServer(b *broker.Broker, logger *logging.Logger, cfg metrics.Config) (*metrics.Server, error) {
 	if cfg.ListenAddr == "" {
-		return nil
+		return nil, nil
 	}
 	metricsServer, err := metrics.NewServer(b, cfg)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	metricsServer.Start()
 	logger.Info("metrics endpoint started",
@@ -276,7 +301,18 @@ func startMetricsServer(b *broker.Broker, logger *logging.Logger, cfg metrics.Co
 		"metrics_interval", cfg.ScrapeInterval.String(),
 		"metrics_top", cfg.TopTopicsLimit,
 	)
-	return nil
+	return metricsServer, nil
+}
+
+func stopRuntime(b *broker.Broker, metricsServer *metrics.Server, logger *logging.Logger) {
+	if metricsServer != nil {
+		metricsServer.Stop()
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := b.Shutdown(ctx); err != nil {
+		logger.Warn("broker shutdown failed", "err", err)
+	}
 }
 
 // startBrokerListeners starts TCP/TLS listeners and aggregates errors.

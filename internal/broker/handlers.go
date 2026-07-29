@@ -125,6 +125,10 @@ func (b *Broker) handleProducer(conn net.Conn, base *pulsar.BaseCommand) error {
 	key := producerKey{conn: conn, id: producerID}
 
 	b.mu.Lock()
+	if b.cfg.MaxProducers > 0 && len(b.producers) >= b.cfg.MaxProducers {
+		b.mu.Unlock()
+		return fmt.Errorf("producer limit reached (%d)", b.cfg.MaxProducers)
+	}
 	switch accessMode {
 	case pulsar.ProducerAccessMode_Shared:
 	case pulsar.ProducerAccessMode_Exclusive:
@@ -221,6 +225,10 @@ func (b *Broker) handleSubscribe(conn net.Conn, base *pulsar.BaseCommand) error 
 
 	// Remove any existing consumer with the same key.
 	b.mu.Lock()
+	if b.cfg.MaxConsumers > 0 && len(b.consumers) >= b.cfg.MaxConsumers && b.consumers[key] == nil {
+		b.mu.Unlock()
+		return fmt.Errorf("consumer limit reached (%d)", b.cfg.MaxConsumers)
+	}
 	if old := b.consumers[key]; old != nil {
 		b.mu.Unlock()
 		b.removeConsumer(key)

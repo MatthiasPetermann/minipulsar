@@ -54,6 +54,10 @@ func Open(path string) (*Store, error) {
 	}
 	db.SetMaxOpenConns(4)
 	db.SetMaxIdleConns(4)
+	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("enable sqlite foreign keys: %w", err)
+	}
 	return &Store{db: db}, nil
 }
 
@@ -128,10 +132,22 @@ CREATE INDEX IF NOT EXISTS idx_pending_by_sub
 CREATE INDEX IF NOT EXISTS idx_messages_by_topic
   ON messages(topic_id, id);
 
+CREATE INDEX IF NOT EXISTS idx_messages_by_topic_publish_time
+  ON messages(topic_id, publish_time);
+
+CREATE INDEX IF NOT EXISTS idx_pending_by_delivery_time
+  ON subscription_pending(delivered_at);
+
 CREATE INDEX IF NOT EXISTS idx_topics_by_namespace
   ON topics(namespace_id, name);
 `
 	if _, err := s.db.Exec(schema); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
+  version INTEGER PRIMARY KEY,
+  applied_at INTEGER NOT NULL
+)`); err != nil {
 		return err
 	}
 	if err := addColumnIfMissing(s.db, "subscriptions", "created_at", "ALTER TABLE subscriptions ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0"); err != nil {
@@ -141,6 +157,13 @@ CREATE INDEX IF NOT EXISTS idx_topics_by_namespace
 		return err
 	}
 	if err := addColumnIfMissing(s.db, "messages", "properties", "ALTER TABLE messages ADD COLUMN properties TEXT NOT NULL DEFAULT '{}'"); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(
+		"INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(?, ?)",
+		1,
+		time.Now().UnixMilli(),
+	); err != nil {
 		return err
 	}
 	return nil
@@ -407,11 +430,19 @@ func (s *Store) ClaimBatch(topicName, sub string, consumerUID int64, limit int) 
 		return nil, err
 	}
 
-	if _, err := tx.Exec(
+	updated, err := tx.Exec(
 		"UPDATE subscriptions SET last_consumer_at=? WHERE topic_id=? AND name=?",
 		time.Now().UnixMilli(), topicID, sub,
-	); err != nil {
+	)
+	if err != nil {
 		return nil, err
+	}
+	updatedRows, err := updated.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if updatedRows == 0 {
+		return nil, fmt.Errorf("subscription %s does not exist for topic %s", sub, topicName)
 	}
 
 	// Ensure cursor row exists.
@@ -654,10 +685,12 @@ func addColumnIfMissing(db *sql.DB, table, column, ddl string) error {
 func addSQLiteSettings(path string) string {
 	const busyTimeout = "_busy_timeout=5000"
 	const journalMode = "_journal_mode=WAL"
+	const foreignKeys = "_foreign_keys=on"
 
 	hasBusyTimeout := strings.Contains(path, busyTimeout)
 	hasJournalMode := strings.Contains(path, journalMode)
-	if hasBusyTimeout && hasJournalMode {
+	hasForeignKeys := strings.Contains(path, foreignKeys)
+	if hasBusyTimeout && hasJournalMode && hasForeignKeys {
 		return path
 	}
 
@@ -672,6 +705,10 @@ func addSQLiteSettings(path string) string {
 	}
 	if !hasJournalMode {
 		path += separator + journalMode
+		separator = "&"
+	}
+	if !hasForeignKeys {
+		path += separator + foreignKeys
 	}
 	return path
 }
