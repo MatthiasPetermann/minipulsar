@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>Reference on minipulsar Documentation</title>
+    <link>//localhost:1313/reference/</link>
+    <description>Recent content in Reference on minipulsar Documentation</description>
+    <generator>Hugo -- gohugo.io</generator>
+    <language>en-us</language><atom:link href="//localhost:1313/reference/index.xml" rel="self" type="application/rss+xml" />
+    <item>
+      <title>Protocol compatibility</title>
+      <link>//localhost:1313/reference/protocol-compatibility/</link>
+      <pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate>
+      <guid>//localhost:1313/reference/protocol-compatibility/</guid>
+      <description>Protocol compatibility minipulsar accepts Pulsar binary protocol frames over TCP or optional TLS. The table describes implemented server behavior, not a claim of full Apache Pulsar feature parity.
+Area Implemented Session CONNECT/CONNECTED, PING/PONG, close producer/consumer Discovery LOOKUP to configured self URL; partition metadata reporting zero partitions Producer producer creation, local Shared/Exclusive/Wait/Fencing access modes, SEND/receipt/error Consumer subscribe, FLOW, Exclusive/Shared/Failover scheduling, close Delivery individual ACK, cumulative ACK for Exclusive/Failover, pending tracking, disconnect/timeout redelivery Positioning initialPosition, start_message_id, rollback duration, SEEK, GET_LAST_MESSAGE_ID Replay REDELIVER_UNACKNOWLEDGED_MESSAGES for messages owned by the requesting consumer Integrity frame/message bounds, Pulsar magic marker, CRC32C validation Deliberate boundaries No partitions, broker discovery cluster, load balancing, replication, or BookKeeper ledger semantics.</description>
+    </item>
+    <item>
+      <title>SQLite storage model</title>
+      <link>//localhost:1313/reference/storage-model/</link>
+      <pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate>
+      <guid>//localhost:1313/reference/storage-model/</guid>
+      <description>SQLite storage model Tables and invariants erDiagram NAMESPACES ||--o{ TOPICS : contains TOPICS ||--o{ MESSAGES : stores TOPICS ||--o{ SUBSCRIPTIONS : owns SUBSCRIPTIONS ||--|| SUBSCRIPTION_CURSOR : advances SUBSCRIPTIONS ||--o{ SUBSCRIPTION_PENDING : tracks NAMESPACES { integer id PK text tenant text name } TOPICS { integer id PK integer namespace_id FK text full_name UK } MESSAGES { integer id PK integer topic_id FK blob payload integer publish_time integer sequence_id text properties } SUBSCRIPTIONS { integer topic_id PK text name PK text type integer last_consumer_at } SUBSCRIPTION_CURSOR { integer topic_id PK text name PK integer next_message_id } SUBSCRIPTION_PENDING { integer topic_id PK text name PK integer message_id PK integer consumer_id integer delivered_at } subscription_cursor.</description>
+    </item>
+    <item>
+      <title>CLI reference</title>
+      <link>//localhost:1313/reference/cli-reference/</link>
+      <pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate>
+      <guid>//localhost:1313/reference/cli-reference/</guid>
+      <description>CLI reference Networking and identity Flag Default Meaning -addr :6650 Plain Pulsar TCP listener; empty disables it. -tls-addr :6651 TLS listener; active only with certificate and key. -broker-url pulsar://localhost:6650 URL returned in plain lookup responses. -broker-url-tls pulsar+ssl://localhost:6651 TLS URL returned in lookup responses. -server-version minipulsar-0.1 Value returned in CONNECTED. -tls-cert, -tls-key empty PEM pair enabling TLS 1.2+. Storage and message limits Flag Default Meaning -db ./minipulsar.db SQLite file path. -max-frame 10 MiB Largest accepted inbound frame.</description>
+    </item>
+  </channel>
+</rss>

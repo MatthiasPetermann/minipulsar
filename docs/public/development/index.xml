@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>Development and integration on minipulsar Documentation</title>
+    <link>//localhost:1313/development/</link>
+    <description>Recent content in Development and integration on minipulsar Documentation</description>
+    <generator>Hugo -- gohugo.io</generator>
+    <language>en-us</language><atom:link href="//localhost:1313/development/index.xml" rel="self" type="application/rss+xml" />
+    <item>
+      <title>Development workflow</title>
+      <link>//localhost:1313/development/workflow/</link>
+      <pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate>
+      <guid>//localhost:1313/development/workflow/</guid>
+      <description>Development workflow Toolchain The module targets Go 1.21. Building generated protocol bindings requires protoc and protoc-gen-go; normal development only needs Go and the C toolchain required by github.com/mattn/go-sqlite3.
+make generate # regenerate pb/PulsarApi.pb.go from pb/PulsarApi.proto make build # build bin/minipulsar make test # go test ./... go test -race ./... go vet ./... Never hand-edit pb/PulsarApi.pb.go. Change pb/PulsarApi.proto, regenerate, then update protocol dispatch, compatibility documentation, and socket tests.
+Change discipline Define expected wire and storage semantics first.</description>
+    </item>
+    <item>
+      <title>Codebase reference</title>
+      <link>//localhost:1313/development/codebase-reference/</link>
+      <pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate>
+      <guid>//localhost:1313/development/codebase-reference/</guid>
+      <description>Codebase reference This is the file-level maintenance map for the current repository. Generated code is documented by source and purpose rather than every generated symbol. All package paths are relative to the repository root.
+Entrypoint and repository assets cmd/minipulsar/main.go Owns process assembly. It parses all CLI flags, creates the logger and SQLite store, loads optional HCL/Lua runtime and TLS configuration, constructs the broker, starts metrics and listeners, and coordinates SIGINT/SIGTERM shutdown.</description>
+    </item>
+  </channel>
+</rss>

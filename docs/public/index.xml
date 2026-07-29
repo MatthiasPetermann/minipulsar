@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>minipulsar on minipulsar Documentation</title>
+    <link>//localhost:1313/</link>
+    <description>Recent content in minipulsar on minipulsar Documentation</description>
+    <generator>Hugo -- gohugo.io</generator>
+    <language>en-us</language><atom:link href="//localhost:1313/index.xml" rel="self" type="application/rss+xml" />
+    <item>
+      <title>Getting started</title>
+      <link>//localhost:1313/getting-started/</link>
+      <pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate>
+      <guid>//localhost:1313/getting-started/</guid>
+      <description>Start a local broker, connect a standard Pulsar client, and understand what a single-node minipulsar instance guarantees.</description>
+    </item>
+    <item>
+      <title>Concepts and architecture</title>
+      <link>//localhost:1313/concepts/</link>
+      <pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate>
+      <guid>//localhost:1313/concepts/</guid>
+      <description>This section explains the runtime boundaries and the delivery model that make the broker predictable for integrators and maintainers.</description>
+    </item>
+    <item>
+      <title>Operations</title>
+      <link>//localhost:1313/operations/</link>
+      <pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate>
+      <guid>//localhost:1313/operations/</guid>
+      <description>Run, protect, observe, and troubleshoot a minipulsar process.</description>
+    </item>
+    <item>
+      <title>Development and integration</title>
+      <link>//localhost:1313/development/</link>
+      <pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate>
+      <guid>//localhost:1313/development/</guid>
+      <description>This section is for maintainers extending broker behavior, storage semantics, protocol support, tests, or operator integrations.</description>
+    </item>
+    <item>
+      <title>Reference</title>
+      <link>//localhost:1313/reference/</link>
+      <pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate>
+      <guid>//localhost:1313/reference/</guid>
+      <description>Protocol support, storage model, and deliberate compatibility boundaries.</description>
+    </item>
+  </channel>
+</rss>

@@ -1,0 +1,22 @@
+baseURL = "/"
+languageCode = "en-us"
+title = "minipulsar Documentation"
+
+[module]
+  [[module.imports]]
+    path = "github.com/McShelby/hugo-theme-relearn"
+
+[params]
+  disableLandingPageButton = true
+  disableInlineCopyToClipBoard = false
+  showVisitedLinks = true
+  collapsibleMenu = true
+  disableSeoHiddenPages = true
+
+[markup]
+  [markup.goldmark]
+    [markup.goldmark.renderer]
+      unsafe = true
+
+[outputs]
+  home = ["HTML", "RSS", "SEARCH"]

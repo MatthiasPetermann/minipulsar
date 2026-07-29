@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>Operations on minipulsar Documentation</title>
+    <link>//localhost:1313/operations/</link>
+    <description>Recent content in Operations on minipulsar Documentation</description>
+    <generator>Hugo -- gohugo.io</generator>
+    <language>en-us</language><atom:link href="//localhost:1313/operations/index.xml" rel="self" type="application/rss+xml" />
+    <item>
+      <title>Configuration and lifecycle</title>
+      <link>//localhost:1313/operations/configuration/</link>
+      <pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate>
+      <guid>//localhost:1313/operations/configuration/</guid>
+      <description>Configuration and lifecycle Core flags Flag Purpose -addr, -tls-addr Plain and optional TLS Pulsar listener addresses. Empty disables a listener. -db SQLite database path. WAL, busy timeout, and foreign keys are enabled. -broker-url, -broker-url-tls URLs returned by LOOKUP. -max-frame, -max-message Inbound allocation and payload limits. -max-connections, -max-producers, -max-consumers Optional global resource caps; 0 disables each cap. -read-timeout, -write-timeout Per-frame network deadlines. -ack-timeout, -ack-timeout-check-interval Pending-delivery expiry and scan interval. -namespace-maintenance-interval Retention and stale-subscription maintenance cadence.</description>
+    </item>
+    <item>
+      <title>Optional TLS, JWT, and policy</title>
+      <link>//localhost:1313/operations/security/</link>
+      <pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate>
+      <guid>//localhost:1313/operations/security/</guid>
+      <description>Optional TLS, JWT, and policy TLS and authentication are optional deployment modes. A local trusted network can run plaintext without an HCL messaging configuration; when a policy is configured, authorization is evaluated for producer creation and subscription.
+TLS Provide both -tls-cert and -tls-key to enable the TLS listener. The broker requires TLS 1.2 or newer. Configure -broker-url-tls to the externally reachable pulsar+ssl:// URL. TLS does not imply client-certificate authentication.
+JWT The built-in verifier accepts HS256 bearer tokens supplied in CONNECT auth data.</description>
+    </item>
+    <item>
+      <title>Observability and TUI</title>
+      <link>//localhost:1313/operations/observability/</link>
+      <pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate>
+      <guid>//localhost:1313/operations/observability/</guid>
+      <description>Observability and TUI Logs and Prometheus The logger supports text or JSON output. Use -log-level and -log-format for machine-readable integration. The optional Prometheus endpoint is configured with -metrics-addr, -metrics-path, -metrics-interval, and -metrics-top-topics.
+Metrics report connected producers/consumers, durable object totals, pending messages, stored messages, top topic pressure, optional subscription backlog, and collector health. Topic and subscription labels are bounded by the top-N limit to avoid unbounded cardinality.
+Control deck Run with -tui to open the Bubble Tea operations interface.</description>
+    </item>
+  </channel>
+</rss>
