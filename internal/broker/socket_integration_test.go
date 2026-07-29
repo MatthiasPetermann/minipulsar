@@ -14,6 +14,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"minipulsar/internal/protocol"
+	"minipulsar/internal/storage"
 	pulsar "minipulsar/pb"
 )
 
@@ -53,7 +54,8 @@ func TestSocketUnsupportedCommandReturnsError(t *testing.T) {
 	_, addr := startSocketTestBroker(t)
 	conn := dialSocketTestBroker(t, addr)
 
-	writeSocketCommand(t, conn, &pulsar.BaseCommand{Type: pulsar.BaseCommand_SEEK.Enum()})
+	unsupported := pulsar.BaseCommand_Type(99)
+	writeSocketCommand(t, conn, &pulsar.BaseCommand{Type: unsupported.Enum()})
 	response, _ := readSocketFrame(t, conn)
 	if response.GetType() != pulsar.BaseCommand_ERROR {
 		t.Fatalf("expected ERROR, got %s", response.GetType())
@@ -171,6 +173,106 @@ func TestSocketProducerSubscribeFlowAndAck(t *testing.T) {
 			t.Fatalf("ack did not clear pending message: %+v", stats)
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestSocketSubscriptionStartSeekAndRedeliver(t *testing.T) {
+	b, addr := startSocketTestBroker(t)
+	const (
+		topic        = "persistent://public/default/socket-positioning"
+		subscription = "positioned-sub"
+		consumerID   = 17
+	)
+	first := &storage.Message{Topic: topic, Payload: []byte("first")}
+	second := &storage.Message{Topic: topic, Payload: []byte("second")}
+	if err := b.store.InsertMessage(first); err != nil {
+		t.Fatalf("insert first: %v", err)
+	}
+	if err := b.store.InsertMessage(second); err != nil {
+		t.Fatalf("insert second: %v", err)
+	}
+
+	consumer := dialSocketTestBroker(t, addr)
+	connectSocketClient(t, consumer)
+	writeSocketCommand(t, consumer, &pulsar.BaseCommand{
+		Type: pulsar.BaseCommand_SUBSCRIBE.Enum(),
+		Subscribe: &pulsar.CommandSubscribe{
+			Topic:          proto.String(topic),
+			Subscription:   proto.String(subscription),
+			SubType:        pulsar.CommandSubscribe_Exclusive.Enum(),
+			ConsumerId:     proto.Uint64(consumerID),
+			RequestId:      proto.Uint64(1),
+			StartMessageId: &pulsar.MessageIdData{LedgerId: proto.Uint64(0), EntryId: proto.Uint64(uint64(second.ID))},
+		},
+	})
+	if response, _ := readSocketFrame(t, consumer); response.GetType() != pulsar.BaseCommand_SUCCESS {
+		t.Fatalf("expected subscribe success, got %s", response.GetType())
+	}
+	writeSocketCommand(t, consumer, &pulsar.BaseCommand{
+		Type: pulsar.BaseCommand_GET_LAST_MESSAGE_ID.Enum(),
+		GetLastMessageId: &pulsar.CommandGetLastMessageId{
+			ConsumerId: proto.Uint64(consumerID), RequestId: proto.Uint64(3),
+		},
+	})
+	last, _ := readSocketFrame(t, consumer)
+	if last.GetType() != pulsar.BaseCommand_GET_LAST_MESSAGE_ID_RESPONSE || last.GetGetLastMessageIdResponse().GetLastMessageId().GetEntryId() != uint64(second.ID) {
+		t.Fatalf("unexpected last message response: %s", last)
+	}
+	writeSocketCommand(t, consumer, &pulsar.BaseCommand{
+		Type: pulsar.BaseCommand_FLOW.Enum(),
+		Flow: &pulsar.CommandFlow{ConsumerId: proto.Uint64(consumerID), MessagePermits: proto.Uint32(1)},
+	})
+	message, payload := readSocketFrame(t, consumer)
+	if message.GetType() != pulsar.BaseCommand_MESSAGE || !bytes.Equal(payload, second.Payload) {
+		t.Fatalf("start_message_id delivered %s with payload %q", message.GetType(), payload)
+	}
+
+	writeSocketCommand(t, consumer, &pulsar.BaseCommand{
+		Type:                            pulsar.BaseCommand_REDELIVER_UNACKNOWLEDGED_MESSAGES.Enum(),
+		RedeliverUnacknowledgedMessages: &pulsar.CommandRedeliverUnacknowledgedMessages{ConsumerId: proto.Uint64(consumerID)},
+	})
+	writeSocketCommand(t, consumer, &pulsar.BaseCommand{
+		Type: pulsar.BaseCommand_FLOW.Enum(),
+		Flow: &pulsar.CommandFlow{ConsumerId: proto.Uint64(consumerID), MessagePermits: proto.Uint32(1)},
+	})
+	message, payload = readSocketFrame(t, consumer)
+	if message.GetType() != pulsar.BaseCommand_MESSAGE || !bytes.Equal(payload, second.Payload) {
+		t.Fatalf("redelivery delivered %s with payload %q", message.GetType(), payload)
+	}
+
+	writeSocketCommand(t, consumer, &pulsar.BaseCommand{
+		Type: pulsar.BaseCommand_ACK.Enum(),
+		Ack: &pulsar.CommandAck{
+			ConsumerId: proto.Uint64(consumerID), AckType: pulsar.CommandAck_Individual.Enum(),
+			MessageId: []*pulsar.MessageIdData{message.GetMessage().GetMessageId()},
+		},
+	})
+	writeSocketCommand(t, consumer, &pulsar.BaseCommand{
+		Type: pulsar.BaseCommand_FLOW.Enum(),
+		Flow: &pulsar.CommandFlow{ConsumerId: proto.Uint64(consumerID), MessagePermits: proto.Uint32(1)},
+	})
+	writeSocketCommand(t, consumer, &pulsar.BaseCommand{
+		Type: pulsar.BaseCommand_SEEK.Enum(),
+		Seek: &pulsar.CommandSeek{
+			ConsumerId: proto.Uint64(consumerID), RequestId: proto.Uint64(2),
+			MessageId: &pulsar.MessageIdData{LedgerId: proto.Uint64(0), EntryId: proto.Uint64(uint64(first.ID))},
+		},
+	})
+
+	seenSuccess := false
+	seenFirst := false
+	for !seenSuccess || !seenFirst {
+		response, body := readSocketFrame(t, consumer)
+		switch response.GetType() {
+		case pulsar.BaseCommand_SUCCESS:
+			if response.GetSuccess().GetRequestId() == 2 {
+				seenSuccess = true
+			}
+		case pulsar.BaseCommand_MESSAGE:
+			if bytes.Equal(body, first.Payload) {
+				seenFirst = true
+			}
+		}
 	}
 }
 

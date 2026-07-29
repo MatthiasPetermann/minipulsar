@@ -205,7 +205,22 @@ func (b *Broker) handleSubscribe(conn net.Conn, base *pulsar.BaseCommand) error 
 		if cmd.InitialPosition != nil && cmd.GetInitialPosition() == pulsar.CommandSubscribe_Earliest {
 			position = storage.InitialPositionEarliest
 		}
-		if err := b.store.EnsureSubscription(topicInfo.FullName, sub, position, storageType); err != nil {
+		var startMessageID []int64
+		if start := cmd.GetStartMessageId(); start != nil {
+			if start.GetLedgerId() != 0 {
+				return fmt.Errorf("start_message_id ledger %d is unsupported", start.GetLedgerId())
+			}
+			startMessageID = []int64{int64(start.GetEntryId())}
+		} else if rollback := cmd.GetStartMessageRollbackDurationSec(); rollback > 0 {
+			id, err := b.store.MessageIDAtOrAfter(topicInfo.FullName, time.Now().Add(-time.Duration(rollback)*time.Second))
+			if err != nil {
+				return fmt.Errorf("resolve subscription rollback position: %w", err)
+			}
+			if id > 0 {
+				startMessageID = []int64{id}
+			}
+		}
+		if err := b.store.EnsureSubscription(topicInfo.FullName, sub, position, storageType, startMessageID...); err != nil {
 			return fmt.Errorf("ensure subscription: %w", err)
 		}
 	}
@@ -270,6 +285,120 @@ func (b *Broker) handleSubscribe(conn net.Conn, base *pulsar.BaseCommand) error 
 		},
 	}
 	return b.writeCommand(conn, resp)
+}
+
+// handleSeek resets a persistent subscription cursor to an entry or publish time.
+func (b *Broker) handleSeek(conn net.Conn, base *pulsar.BaseCommand) error {
+	cmd := base.GetSeek()
+	if cmd == nil {
+		return fmt.Errorf("SEEK without payload")
+	}
+	key := consumerKey{conn: conn, id: cmd.GetConsumerId()}
+	b.mu.RLock()
+	c := b.consumers[key]
+	b.mu.RUnlock()
+	if c == nil {
+		return fmt.Errorf("SEEK for unknown consumer %d", cmd.GetConsumerId())
+	}
+	if !c.persistent {
+		return fmt.Errorf("SEEK is unsupported for non-persistent topics")
+	}
+	nextID := int64(1)
+	if id := cmd.GetMessageId(); id != nil {
+		if id.GetLedgerId() != 0 {
+			return fmt.Errorf("SEEK ledger %d is unsupported", id.GetLedgerId())
+		}
+		nextID = int64(id.GetEntryId())
+	} else if publishTime := cmd.GetMessagePublishTime(); publishTime > 0 {
+		id, err := b.store.MessageIDAtOrAfter(c.topic, time.UnixMilli(int64(publishTime)))
+		if err != nil {
+			return fmt.Errorf("resolve SEEK position: %w", err)
+		}
+		if id > 0 {
+			nextID = id
+		} else {
+			nextID = int64(^uint64(0) >> 1)
+		}
+	}
+	if err := b.store.ResetSubscription(c.topic, c.subscription, nextID); err != nil {
+		return fmt.Errorf("reset subscription cursor: %w", err)
+	}
+	s, err := b.getOrCreateSubState(c.topic, c.subscription, true, c.subType)
+	if err != nil {
+		return err
+	}
+	b.maybeStartSubDelivery(s)
+	return b.writeCommand(conn, &pulsar.BaseCommand{
+		Type:    pulsar.BaseCommand_SUCCESS.Enum(),
+		Success: &pulsar.CommandSuccess{RequestId: proto.Uint64(cmd.GetRequestId())},
+	})
+}
+
+// handleRedeliver requeues this consumer's pending messages for immediate delivery.
+func (b *Broker) handleRedeliver(conn net.Conn, base *pulsar.BaseCommand) error {
+	cmd := base.GetRedeliverUnacknowledgedMessages()
+	if cmd == nil {
+		return fmt.Errorf("REDELIVER_UNACKNOWLEDGED_MESSAGES without payload")
+	}
+	key := consumerKey{conn: conn, id: cmd.GetConsumerId()}
+	b.mu.RLock()
+	c := b.consumers[key]
+	b.mu.RUnlock()
+	if c == nil {
+		return fmt.Errorf("redeliver for unknown consumer %d", cmd.GetConsumerId())
+	}
+	if !c.persistent {
+		return nil
+	}
+	ids := make([]int64, 0, len(cmd.GetMessageIds()))
+	for _, id := range cmd.GetMessageIds() {
+		if id.GetLedgerId() != 0 {
+			return fmt.Errorf("redeliver ledger %d is unsupported", id.GetLedgerId())
+		}
+		ids = append(ids, int64(id.GetEntryId()))
+	}
+	if err := b.store.RedeliverPending(c.topic, c.subscription, c.uid, ids); err != nil {
+		return fmt.Errorf("requeue pending messages: %w", err)
+	}
+	s, err := b.getOrCreateSubState(c.topic, c.subscription, true, c.subType)
+	if err != nil {
+		return err
+	}
+	b.maybeStartSubDelivery(s)
+	return nil
+}
+
+// handleGetLastMessageID returns the latest entry visible on a consumer topic.
+func (b *Broker) handleGetLastMessageID(conn net.Conn, base *pulsar.BaseCommand) error {
+	cmd := base.GetGetLastMessageId()
+	if cmd == nil {
+		return fmt.Errorf("GET_LAST_MESSAGE_ID without payload")
+	}
+	key := consumerKey{conn: conn, id: cmd.GetConsumerId()}
+	b.mu.RLock()
+	c := b.consumers[key]
+	b.mu.RUnlock()
+	if c == nil {
+		return fmt.Errorf("GET_LAST_MESSAGE_ID for unknown consumer %d", cmd.GetConsumerId())
+	}
+	entryID := int64(0)
+	if c.persistent {
+		var err error
+		entryID, err = b.store.LastMessageID(c.topic)
+		if err != nil {
+			return fmt.Errorf("read last message id: %w", err)
+		}
+	}
+	return b.writeCommand(conn, &pulsar.BaseCommand{
+		Type: pulsar.BaseCommand_GET_LAST_MESSAGE_ID_RESPONSE.Enum(),
+		GetLastMessageIdResponse: &pulsar.CommandGetLastMessageIdResponse{
+			RequestId: proto.Uint64(cmd.GetRequestId()),
+			LastMessageId: &pulsar.MessageIdData{
+				LedgerId: proto.Uint64(0),
+				EntryId:  proto.Uint64(uint64(entryID)),
+			},
+		},
+	})
 }
 
 // handleSend stores a message from a producer and triggers delivery.

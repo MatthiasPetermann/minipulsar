@@ -15,9 +15,23 @@ import (
 )
 
 const (
-	defaultTopLimit = 10
-	logBufferMax    = 1000
+	defaultTopLimit  = 10
+	logBufferMax     = 1000
+	historyMax       = 30
+	canvasBackground = "\x1b[48;2;27;16;53m"
+	ansiReset        = "\x1b[0m"
 )
+
+type view int
+
+const (
+	overviewView view = iota
+	topicsView
+	backlogView
+	logsView
+)
+
+var viewNames = [...]string{"Overview", "Topics", "Backlog", "Logs"}
 
 type statsMsg struct {
 	stats broker.StatsSnapshot
@@ -54,6 +68,10 @@ type model struct {
 	followLogs bool
 	startedAt  time.Time
 	updatedAt  time.Time
+	activeView view
+	selected   int
+	throughput []float64
+	pending    []int
 }
 
 // NewProgram builds a Bubble Tea program that renders broker stats and logs.
@@ -73,7 +91,7 @@ func NewProgram(b *broker.Broker, logCh <-chan string, levelVar *slog.LevelVar, 
 
 // Init kicks off periodic ticks and log streaming for the TUI.
 func (m model) Init() tea.Cmd {
-	return tea.Batch(tick(), waitForLog(m.logCh))
+	return tea.Batch(fetchStats(m.broker), tick(), waitForLog(m.logCh))
 }
 
 // tick emits a periodic message used to refresh stats.
@@ -113,6 +131,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.stats = msg.stats
 		m.err = msg.err
 		m.updatedAt = time.Now()
+		if msg.err == nil {
+			m.throughput = appendHistory(m.throughput, msg.stats.ThroughputPS, historyMax)
+			m.pending = appendHistory(m.pending, msg.stats.Pending, historyMax)
+			m.clampSelection()
+		}
 		return m, nil
 	case logMsg:
 		if !msg.ok {
@@ -131,6 +154,28 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
+		case "tab", "right":
+			m.activeView = nextView(m.activeView, 1)
+			m.selected = 0
+			m.clampSelection()
+		case "shift+tab", "left":
+			m.activeView = nextView(m.activeView, -1)
+			m.selected = 0
+			m.clampSelection()
+		case "1":
+			m.activeView = overviewView
+		case "2":
+			m.activeView = topicsView
+			m.selected = 0
+			m.clampSelection()
+		case "3":
+			m.activeView = backlogView
+			m.selected = 0
+			m.clampSelection()
+		case "4":
+			m.activeView = logsView
+		case "r":
+			return m, fetchStats(m.broker)
 		case "l":
 			m.rotateLogLevel()
 		case "d":
@@ -146,13 +191,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.logs = nil
 			m.viewport.SetContent("")
 		case "up", "k":
-			m.viewport.LineUp(1)
+			m.moveSelection(-1)
 		case "down", "j":
-			m.viewport.LineDown(1)
+			m.moveSelection(1)
 		case "pgup":
-			m.viewport.HalfViewUp()
+			if m.activeView == logsView {
+				m.viewport.HalfViewUp()
+			}
 		case "pgdown":
-			m.viewport.HalfViewDown()
+			if m.activeView == logsView {
+				m.viewport.HalfViewDown()
+			}
 		}
 	}
 	return m, nil
@@ -165,54 +214,23 @@ func (m *model) resize() {
 	}
 	m.ready = true
 
-	outerPadding := 1
-	usableWidth := m.width - outerPadding*2 - 2
-	if usableWidth < 40 {
-		outerPadding = 1
-		usableWidth = m.width - outerPadding*2 - 2
-	}
-	m.padding = outerPadding
+	const outerX = 1
+	const outerY = 1
+	contentWidth := max(1, m.width-outerX*2)
+	contentHeight := max(1, m.height-outerY*2)
+	// Header, navigation, and footer each consume one terminal row.
+	panelHeight := max(3, contentHeight-3)
+	panelInnerHeight := max(1, panelHeight-2) // Rounded border consumes two rows.
 
-	headerHeight := 6
-	helpHeight := 1
-	verticalPadding := outerPadding * 2
-	availableHeight := m.height - headerHeight - helpHeight - verticalPadding
-	if availableHeight < 6 {
-		availableHeight = 6
-	}
-
-	topHeight := int(math.Round(float64(availableHeight) * 0.45))
-	if topHeight < 8 {
-		topHeight = 8
-	}
-	logHeight := availableHeight - topHeight
-	if logHeight < 6 {
-		logHeight = 6
-	}
-
-	statsWidth := int(math.Round(float64(m.width) * 0.35))
-	if statsWidth < 28 {
-		statsWidth = 28
-	}
-	if statsWidth > usableWidth-30 {
-		statsWidth = usableWidth - 30
-	}
-	topicsWidth := usableWidth - statsWidth - 3
-	if topicsWidth < 30 {
-		topicsWidth = 30
-		statsWidth = usableWidth - topicsWidth - 3
-	}
-
-	m.viewport = viewport.New(usableWidth-2, logHeight)
+	m.padding = outerX
+	m.viewport = viewport.New(max(1, contentWidth-4), max(1, panelInnerHeight-3))
 	m.viewport.SetContent(strings.Join(m.logs, "\n"))
-	m.viewport.GotoBottom()
+	if m.followLogs {
+		m.viewport.GotoBottom()
+	}
 	m.layout = layout{
-		topHeight:    topHeight,
-		logHeight:    logHeight,
-		statsWidth:   statsWidth,
-		topicsWidth:  topicsWidth,
-		totalWidth:   usableWidth + 2,
-		headerHeight: headerHeight,
+		contentWidth: contentWidth,
+		panelHeight:  panelHeight,
 	}
 }
 
@@ -224,48 +242,43 @@ func (m model) View() string {
 
 	styles := newStyles()
 
-	headerLine := styles.headerLine.Render(strings.Repeat("─", m.layout.totalWidth))
 	status := "LIVE"
 	if m.paused {
 		status = "PAUSED"
 	}
-	headerText := lipgloss.Place(
-		m.layout.totalWidth,
-		1,
-		lipgloss.Center,
-		lipgloss.Center,
-		styles.headerText.Render(fmt.Sprintf("MINIPULSAR  /  %s  /  %.1f msg/s", status, m.stats.ThroughputPS)),
+	header := renderHeader(status, m.stats.ThroughputPS, m.layout.contentWidth, styles)
+	navigation := renderNavigation(m.activeView, m.layout.contentWidth, styles)
+	panel := styles.box.Width(max(1, m.layout.contentWidth-2)).Height(max(1, m.layout.panelHeight-2)).Render(
+		m.renderActiveView(max(1, m.layout.contentWidth-4), max(1, m.layout.panelHeight-4)),
 	)
-	header := lipgloss.JoinVertical(lipgloss.Left, headerLine, headerText, headerLine)
-	stats := styles.box.Width(m.layout.statsWidth).Height(m.layout.topHeight).Render(renderOverview(m.stats, m.err, time.Since(m.startedAt)))
-	topics := styles.box.Width(m.layout.topicsWidth).Height(m.layout.topHeight).Render(renderTopTopics(m.stats, m.layout.topicsWidth-2))
-	row := lipgloss.JoinHorizontal(lipgloss.Top, stats, " ", topics)
-	logs := styles.box.Width(m.layout.totalWidth - 2).Height(m.layout.logHeight).Render(m.viewport.View())
-	help := styles.help.Render(fmt.Sprintf(
-		"q quit  l log:%s  d delay:%ds  space pause:%s  f follow:%s  c clear logs  ↑/↓/pgup/pgdown scroll",
-		logLevelLabel(m.logLevel),
+	help := lipgloss.Place(m.layout.contentWidth, 1, lipgloss.Center, lipgloss.Center, styles.help.Render(fmt.Sprintf(
+		"1-4/tab view  j/k navigate  r refresh  d:%ds  space:%s  l:%s  f:%s  c clear  q quit",
 		m.delayLevel,
 		pauseLabel(m.paused),
+		logLevelLabel(m.logLevel),
 		pauseLabel(m.followLogs),
-	))
+	)))
 
-	content := lipgloss.JoinVertical(lipgloss.Left, header, row, logs, help)
-	return lipgloss.NewStyle().Padding(m.padding, m.padding).Render(content)
+	content := lipgloss.JoinVertical(lipgloss.Left, header, navigation, panel, help)
+	canvas := styles.screen.Width(m.width).Height(m.height).Render(
+		lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content),
+	)
+	// Lipgloss resets styles after nested labels. Reapply the canvas background
+	// after every reset so blank space beside labels never falls back to black.
+	return canvasBackground + strings.ReplaceAll(canvas, ansiReset, ansiReset+canvasBackground) + ansiReset
 }
 
 type layout struct {
-	topHeight    int
-	logHeight    int
-	statsWidth   int
-	topicsWidth  int
-	totalWidth   int
-	headerHeight int
+	contentWidth int
+	panelHeight  int
 }
 
 type styleSet struct {
 	headerBox  lipgloss.Style
 	headerLine lipgloss.Style
 	headerText lipgloss.Style
+	screen     lipgloss.Style
+	header     lipgloss.Style
 	box        lipgloss.Style
 	help       lipgloss.Style
 	accent     lipgloss.Style
@@ -274,6 +287,8 @@ type styleSet struct {
 	bar        lipgloss.Style
 	warning    lipgloss.Style
 	success    lipgloss.Style
+	selected   lipgloss.Style
+	muted      lipgloss.Style
 }
 
 // newStyles defines the synthwave color palette and component styles.
@@ -294,6 +309,11 @@ func newStyles() styleSet {
 	return styleSet{
 		headerBox: lipgloss.NewStyle().
 			Background(bg),
+		screen: lipgloss.NewStyle().
+			Background(bg),
+		header: lipgloss.NewStyle().
+			Background(bg).
+			Foreground(text),
 		headerLine: lipgloss.NewStyle().
 			Foreground(pink),
 		headerText: lipgloss.NewStyle().
@@ -301,72 +321,271 @@ func newStyles() styleSet {
 			Background(bg).
 			Bold(true).
 			Align(lipgloss.Center),
-		box:     box,
-		help:    lipgloss.NewStyle().Foreground(cyan).Padding(0, 1),
-		accent:  lipgloss.NewStyle().Foreground(pink).Bold(true),
-		label:   lipgloss.NewStyle().Foreground(cyan),
-		value:   lipgloss.NewStyle().Foreground(text).Bold(true),
-		bar:     lipgloss.NewStyle().Foreground(pink),
-		warning: lipgloss.NewStyle().Foreground(lipgloss.Color("#FFB703")).Bold(true),
-		success: lipgloss.NewStyle().Foreground(lipgloss.Color("#80ED99")).Bold(true),
+		box:      box,
+		help:     lipgloss.NewStyle().Foreground(cyan).Background(bg),
+		accent:   lipgloss.NewStyle().Foreground(pink).Bold(true),
+		label:    lipgloss.NewStyle().Foreground(cyan),
+		value:    lipgloss.NewStyle().Foreground(text).Bold(true),
+		bar:      lipgloss.NewStyle().Foreground(pink),
+		warning:  lipgloss.NewStyle().Foreground(lipgloss.Color("#FFB703")).Bold(true),
+		success:  lipgloss.NewStyle().Foreground(lipgloss.Color("#80ED99")).Bold(true),
+		selected: lipgloss.NewStyle().Foreground(bg).Background(cyan).Bold(true),
+		muted:    lipgloss.NewStyle().Foreground(lipgloss.Color("#A89CC8")),
 	}
 }
 
-// renderOverview builds the left-hand stats panel.
-func renderOverview(stats broker.StatsSnapshot, err error, uptime time.Duration) string {
+// renderActiveView renders the selected operational panel from the latest snapshot.
+func (m model) renderActiveView(width, height int) string {
+	switch m.activeView {
+	case topicsView:
+		return renderTopicsView(m.stats, m.selected, width, height)
+	case backlogView:
+		return renderBacklogView(m.stats, m.selected, width, height)
+	case logsView:
+		return renderLogsView(m.viewport, m.followLogs, len(m.logs), width)
+	default:
+		return renderDashboard(m.stats, m.err, time.Since(m.startedAt), m.throughput, m.pending, width)
+	}
+}
+
+func renderNavigation(active view, width int, styles styleSet) string {
+	items := make([]string, len(viewNames))
+	for i, name := range viewNames {
+		if width < 54 {
+			name = string(name[0])
+		}
+		label := fmt.Sprintf(" %d %s ", i+1, name)
+		if view(i) == active {
+			items[i] = styles.selected.Render(label)
+		} else {
+			items[i] = styles.muted.Render(label)
+		}
+	}
+	return lipgloss.NewStyle().Background(lipgloss.Color("#1B1035")).Render(
+		lipgloss.Place(width, 1, lipgloss.Center, lipgloss.Center, strings.Join(items, " ")),
+	)
+}
+
+func renderHeader(status string, throughput float64, width int, styles styleSet) string {
+	brand := styles.accent.Render("MINIPULSAR")
+	stateStyle := styles.success
+	if status == "PAUSED" {
+		stateStyle = styles.warning
+	}
+	state := stateStyle.Render(" " + status + " ")
+	if width < 48 {
+		return styles.header.Width(width).Render(lipgloss.JoinHorizontal(lipgloss.Left, brand, " ", state))
+	}
+	rate := styles.muted.Render(fmt.Sprintf("%.1f msg/s", throughput))
+	return styles.header.Width(width).Render(lipgloss.JoinHorizontal(lipgloss.Left, brand, "  ", state, "  ", rate))
+}
+
+func renderDashboard(stats broker.StatsSnapshot, err error, uptime time.Duration, throughput []float64, pending []int, width int) string {
 	styles := newStyles()
-	lines := []string{
-		styles.accent.Render("Broker Overview"),
-		"",
-		fmt.Sprintf("%s %s", styles.label.Render("Uptime"), styles.value.Render(formatDuration(uptime))),
-		fmt.Sprintf("%s %s", styles.label.Render("Producers"), styles.value.Render(fmt.Sprintf("%d", stats.Producers))),
-		fmt.Sprintf("%s %s", styles.label.Render("Consumers"), styles.value.Render(fmt.Sprintf("%d", stats.Consumers))),
-		fmt.Sprintf("%s %s", styles.label.Render("Topics"), styles.value.Render(fmt.Sprintf("%d", stats.Topics))),
-		fmt.Sprintf("%s %s", styles.label.Render("Subscriptions"), styles.value.Render(fmt.Sprintf("%d", stats.Subscriptions))),
-		fmt.Sprintf("%s %s", styles.label.Render("Pending"), styles.value.Render(fmt.Sprintf("%d", stats.Pending))),
-		fmt.Sprintf("%s %s", styles.label.Render("Alloc Mem"), styles.value.Render(formatBytes(stats.MemoryAlloc))),
-		fmt.Sprintf("%s %s", styles.label.Render("Msgs/sec"), styles.value.Render(fmt.Sprintf("%.1f", stats.ThroughputPS))),
+	leftWidth := max(28, width/2-1)
+	rightWidth := max(24, width-leftWidth-2)
+	if leftWidth+rightWidth+2 > width {
+		leftWidth = max(1, width/2-1)
+		rightWidth = max(1, width-leftWidth-2)
+	}
+	health := "CLEAR"
+	if stats.Pending > 0 {
+		health = "BACKLOG"
 	}
 	if err != nil {
-		lines = append(lines, "", styles.label.Render("Stats error: ")+err.Error())
+		health = "DEGRADED"
 	}
+	pressure := percent(stats.Pending, stats.Messages)
+	left := []string{
+		styles.accent.Render("Broker Overview"),
+		"",
+		fmt.Sprintf("%s %s", styles.label.Render("Health"), styles.value.Render(health)),
+		fmt.Sprintf("%s %s", styles.label.Render("Uptime"), styles.value.Render(formatDuration(uptime))),
+		fmt.Sprintf("%s %s", styles.label.Render("Connections"), styles.value.Render(fmt.Sprintf("%d producers / %d consumers", stats.Producers, stats.Consumers))),
+		fmt.Sprintf("%s %s", styles.label.Render("Topology"), styles.value.Render(fmt.Sprintf("%d namespaces / %d topics", stats.Namespaces, stats.Topics))),
+		fmt.Sprintf("%s %s", styles.label.Render("Stored"), styles.value.Render(fmt.Sprintf("%d messages / %d subscriptions", stats.Messages, stats.Subscriptions))),
+		fmt.Sprintf("%s %s", styles.label.Render("Pending"), styles.warning.Render(fmt.Sprintf("%d (%.1f%% of stored)", stats.Pending, pressure))),
+		fmt.Sprintf("%s %s", styles.label.Render("Memory"), styles.value.Render(formatBytes(stats.MemoryAlloc))),
+	}
+	if err != nil {
+		left = append(left, "", styles.warning.Render("Stats error: "+err.Error()))
+	}
+	right := []string{
+		styles.accent.Render("Live Signals"),
+		"",
+		styles.label.Render("Throughput (messages/sec)"),
+		styles.bar.Render(sparklineFloat(throughput, rightWidth-2)),
+		styles.value.Render(fmt.Sprintf("%.1f msg/s", stats.ThroughputPS)),
+		"",
+		styles.label.Render("Pending message trend"),
+		styles.bar.Render(sparklineInt(pending, rightWidth-2)),
+		styles.value.Render(fmt.Sprintf("%d pending", stats.Pending)),
+		"",
+		styles.label.Render("Hottest topic"),
+	}
+	if len(stats.TopTopics) == 0 {
+		right = append(right, styles.muted.Render("No topic activity yet."))
+	} else {
+		topic := stats.TopTopics[0]
+		right = append(right, styles.value.Render(truncate(topic.Topic, rightWidth-2)))
+		right = append(right, styles.warning.Render(fmt.Sprintf("%d pending / %d stored", topic.PendingCount, topic.MessageCount)))
+	}
+	return lipgloss.JoinHorizontal(lipgloss.Top, lipgloss.NewStyle().Width(leftWidth).Render(strings.Join(left, "\n")), "  ", lipgloss.NewStyle().Width(rightWidth).Render(strings.Join(right, "\n")))
+}
+
+func renderTopicsView(stats broker.StatsSnapshot, selected, width, height int) string {
+	styles := newStyles()
+	lines := []string{styles.accent.Render("Topic Pressure"), styles.muted.Render("j/k selects a topic. Pending is the active delivery queue across subscriptions."), ""}
+	if len(stats.TopTopics) == 0 {
+		return strings.Join(append(lines, styles.label.Render("No topics have been recorded.")), "\n")
+	}
+	topicWidth := max(12, width-31)
+	lines = append(lines, styles.label.Render(fmt.Sprintf("  %-*s %8s %8s  %s", topicWidth, "Topic", "Stored", "Pending", "Pressure")))
+	for i, topic := range stats.TopTopics {
+		prefix := " "
+		if i == selected {
+			prefix = ">"
+		}
+		line := fmt.Sprintf("%s %-*s %8d %8d  %s", prefix, topicWidth, truncate(topic.Topic, topicWidth), topic.MessageCount, topic.PendingCount, backlogBar(topic.PendingCount, topic.MessageCount, 10))
+		if i == selected {
+			line = styles.selected.Render(line)
+		}
+		lines = append(lines, line)
+	}
+	selectedTopic := stats.TopTopics[min(selected, len(stats.TopTopics)-1)]
+	lines = append(lines, "", styles.label.Render("Selected"), styles.value.Render(fmt.Sprintf("%s  |  %d stored  |  %d pending  |  %.1f%% pressure", selectedTopic.Topic, selectedTopic.MessageCount, selectedTopic.PendingCount, percent(selectedTopic.PendingCount, selectedTopic.MessageCount))))
 	return strings.Join(lines, "\n")
 }
 
-// renderTopTopics builds the right-hand topic activity panel.
-func renderTopTopics(stats broker.StatsSnapshot, width int) string {
+func renderBacklogView(stats broker.StatsSnapshot, selected, width, height int) string {
 	styles := newStyles()
-	lines := []string{styles.accent.Render("Top Topics / Backlog Pressure"), ""}
-
-	if len(stats.TopTopics) == 0 {
-		lines = append(lines, styles.label.Render("No topic activity yet."))
-		return strings.Join(lines, "\n")
+	lines := []string{styles.accent.Render("Subscription Backlog"), styles.muted.Render("Backlog is available for namespaces with configured retention policies."), ""}
+	if len(stats.TopSubscriptionsBacklog) == 0 {
+		return strings.Join(append(lines, styles.label.Render("No subscription backlog data is available.")), "\n")
 	}
-
-	metricWidth := 6
-	barWidth := 10
-	topicWidth := width - metricWidth*2 - barWidth - 3
-	if topicWidth < 10 {
-		topicWidth = 10
+	topicWidth := max(12, width-31)
+	lines = append(lines, styles.label.Render(fmt.Sprintf("  %-*s %-12s %10s", topicWidth, "Topic", "Subscription", "Backlog")))
+	for i, sub := range stats.TopSubscriptionsBacklog {
+		prefix := " "
+		if i == selected {
+			prefix = ">"
+		}
+		line := fmt.Sprintf("%s %-*s %-12s %10d", prefix, topicWidth, truncate(sub.Topic, topicWidth), truncate(sub.Subscription, 12), sub.BacklogCount)
+		if i == selected {
+			line = styles.selected.Render(line)
+		}
+		lines = append(lines, line)
 	}
-
-	head := fmt.Sprintf("%-*s %*s %*s %s", topicWidth, "Topic", metricWidth, "Msgs", metricWidth, "Pend", "Pressure")
-	lines = append(lines, styles.label.Render(head))
-
-	for _, topic := range stats.TopTopics {
-		lines = append(lines, fmt.Sprintf(
-			"%-*s %*d %*d %s",
-			topicWidth,
-			truncate(topic.Topic, topicWidth),
-			metricWidth,
-			topic.MessageCount,
-			metricWidth,
-			topic.PendingCount,
-			backlogBar(topic.PendingCount, topic.MessageCount, barWidth),
-		))
-	}
-
+	sub := stats.TopSubscriptionsBacklog[min(selected, len(stats.TopSubscriptionsBacklog)-1)]
+	lines = append(lines, "", styles.label.Render("Selected"), styles.value.Render(fmt.Sprintf("%s / %s has %d messages awaiting delivery", sub.Topic, sub.Subscription, sub.BacklogCount)))
 	return strings.Join(lines, "\n")
+}
+
+func renderLogsView(logs viewport.Model, following bool, count, width int) string {
+	styles := newStyles()
+	state := "paused"
+	if following {
+		state = "following"
+	}
+	return strings.Join([]string{styles.accent.Render("Broker Logs"), styles.muted.Render(fmt.Sprintf("%d buffered lines, %s. j/k and pgup/pgdown scroll.", count, state)), "", logs.View()}, "\n")
+}
+
+func nextView(current view, direction int) view {
+	count := len(viewNames)
+	return view((int(current) + direction + count) % count)
+}
+
+func appendHistory[T any](values []T, value T, limit int) []T {
+	values = append(values, value)
+	if len(values) > limit {
+		return values[len(values)-limit:]
+	}
+	return values
+}
+
+func (m *model) moveSelection(direction int) {
+	if m.activeView == logsView {
+		if direction < 0 {
+			m.viewport.LineUp(1)
+		} else {
+			m.viewport.LineDown(1)
+		}
+		return
+	}
+	if m.activeView != topicsView && m.activeView != backlogView {
+		return
+	}
+	m.selected += direction
+	m.clampSelection()
+}
+
+func (m *model) clampSelection() {
+	count := 0
+	switch m.activeView {
+	case topicsView:
+		count = len(m.stats.TopTopics)
+	case backlogView:
+		count = len(m.stats.TopSubscriptionsBacklog)
+	}
+	if count == 0 {
+		m.selected = 0
+		return
+	}
+	if m.selected < 0 {
+		m.selected = 0
+	}
+	if m.selected >= count {
+		m.selected = count - 1
+	}
+}
+
+func percent(numerator, denominator int) float64 {
+	if denominator <= 0 {
+		return 0
+	}
+	return float64(numerator) * 100 / float64(denominator)
+}
+
+func sparklineFloat(values []float64, width int) string {
+	if len(values) == 0 || width <= 0 {
+		return "-"
+	}
+	values = compactFloat(values, width)
+	maxValue := 0.0
+	for _, value := range values {
+		if value > maxValue {
+			maxValue = value
+		}
+	}
+	if maxValue == 0 {
+		return strings.Repeat("_", len(values))
+	}
+	levels := []rune("▁▂▃▄▅▆▇█")
+	var out strings.Builder
+	for _, value := range values {
+		index := int(math.Round(value / maxValue * float64(len(levels)-1)))
+		out.WriteRune(levels[index])
+	}
+	return out.String()
+}
+
+func sparklineInt(values []int, width int) string {
+	floatValues := make([]float64, len(values))
+	for i, value := range values {
+		floatValues[i] = float64(value)
+	}
+	return sparklineFloat(floatValues, width)
+}
+
+func compactFloat(values []float64, width int) []float64 {
+	if len(values) <= width {
+		return values
+	}
+	result := make([]float64, width)
+	for i := range result {
+		result[i] = values[i*len(values)/width]
+	}
+	return result
 }
 
 func backlogBar(pending, messages, width int) string {

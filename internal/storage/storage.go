@@ -171,7 +171,7 @@ CREATE INDEX IF NOT EXISTS idx_topics_by_namespace
 
 // EnsureSubscription ensures the subscription exists and has an initialized cursor.
 // This matches Pulsar's semantics where subscriptions are created on demand.
-func (s *Store) EnsureSubscription(topicName, name string, position SubscriptionInitialPosition, subType SubscriptionType) error {
+func (s *Store) EnsureSubscription(topicName, name string, position SubscriptionInitialPosition, subType SubscriptionType, startMessageID ...int64) error {
 	info, err := topic.Parse(topicName)
 	if err != nil {
 		return err
@@ -205,7 +205,9 @@ func (s *Store) EnsureSubscription(topicName, name string, position Subscription
 			subType = SubscriptionTypeShared
 		}
 		nextID := int64(1)
-		if position == InitialPositionLatest {
+		if len(startMessageID) > 0 {
+			nextID = startMessageID[0]
+		} else if position == InitialPositionLatest {
 			var maxID int64
 			if err := tx.QueryRow(
 				"SELECT COALESCE(MAX(id), 0) FROM messages WHERE topic_id=?",
@@ -245,6 +247,129 @@ func (s *Store) EnsureSubscription(topicName, name string, position Subscription
 		}
 	}
 
+	return tx.Commit()
+}
+
+// MessageIDAtOrAfter returns the first entry on a topic at or after publishTime.
+// A zero result means no matching stored message exists yet.
+func (s *Store) MessageIDAtOrAfter(topicName string, publishTime time.Time) (int64, error) {
+	topicID, err := s.lookupTopicID(topicName)
+	if err != nil || topicID == 0 {
+		return 0, err
+	}
+	var id int64
+	if err := s.db.QueryRow(
+		"SELECT COALESCE(MIN(id), 0) FROM messages WHERE topic_id=? AND publish_time>=?",
+		topicID,
+		publishTime.UnixMilli(),
+	).Scan(&id); err != nil {
+		return 0, err
+	}
+	return id, nil
+}
+
+// LastMessageID returns the newest persisted entry ID for a topic, or zero when empty.
+func (s *Store) LastMessageID(topicName string) (int64, error) {
+	topicID, err := s.lookupTopicID(topicName)
+	if err != nil || topicID == 0 {
+		return 0, err
+	}
+	var id int64
+	if err := s.db.QueryRow("SELECT COALESCE(MAX(id), 0) FROM messages WHERE topic_id=?", topicID).Scan(&id); err != nil {
+		return 0, err
+	}
+	return id, nil
+}
+
+// ResetSubscription moves a subscription cursor and clears outstanding deliveries.
+// Any message already written to a socket can be delivered again after this operation.
+func (s *Store) ResetSubscription(topicName, sub string, nextMessageID int64) error {
+	if nextMessageID < 1 {
+		nextMessageID = 1
+	}
+	topicID, err := s.lookupTopicID(topicName)
+	if err != nil || topicID == 0 {
+		return err
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.Exec("DELETE FROM subscription_pending WHERE topic_id=? AND name=?", topicID, sub); err != nil {
+		return err
+	}
+	result, err := tx.Exec(
+		"UPDATE subscription_cursor SET next_message_id=? WHERE topic_id=? AND name=?",
+		nextMessageID, topicID, sub,
+	)
+	if err != nil {
+		return err
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if updated == 0 {
+		return fmt.Errorf("subscription %s does not exist for topic %s", sub, topicName)
+	}
+	return tx.Commit()
+}
+
+// RedeliverPending requeues pending messages owned by a consumer. An empty ids
+// slice requeues every outstanding message owned by that consumer.
+func (s *Store) RedeliverPending(topicName, sub string, consumerUID int64, ids []int64) error {
+	topicID, err := s.lookupTopicID(topicName)
+	if err != nil || topicID == 0 {
+		return err
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	minID := int64(0)
+	if len(ids) == 0 {
+		err = tx.QueryRow(
+			"SELECT COALESCE(MIN(message_id), 0) FROM subscription_pending WHERE topic_id=? AND name=? AND consumer_id=?",
+			topicID, sub, consumerUID,
+		).Scan(&minID)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(
+			"DELETE FROM subscription_pending WHERE topic_id=? AND name=? AND consumer_id=?",
+			topicID, sub, consumerUID,
+		); err != nil {
+			return err
+		}
+	} else {
+		for _, id := range ids {
+			result, err := tx.Exec(
+				"DELETE FROM subscription_pending WHERE topic_id=? AND name=? AND message_id=? AND consumer_id=?",
+				topicID, sub, id, consumerUID,
+			)
+			if err != nil {
+				return err
+			}
+			affected, err := result.RowsAffected()
+			if err != nil {
+				return err
+			}
+			if affected > 0 && (minID == 0 || id < minID) {
+				minID = id
+			}
+		}
+	}
+	if minID > 0 {
+		if _, err := tx.Exec(
+			"UPDATE subscription_cursor SET next_message_id=MIN(next_message_id, ?) WHERE topic_id=? AND name=?",
+			minID, topicID, sub,
+		); err != nil {
+			return err
+		}
+	}
 	return tx.Commit()
 }
 

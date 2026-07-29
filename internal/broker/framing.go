@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strings"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -58,39 +59,88 @@ func (b *Broker) handleFrame(conn net.Conn) error {
 		return fmt.Errorf("unmarshal BaseCommand: %w", err)
 	}
 
+	var handlerErr error
 	switch base.GetType() {
 	case pulsar.BaseCommand_CONNECT:
-		return b.handleConnect(conn, &base)
+		handlerErr = b.handleConnect(conn, &base)
 	case pulsar.BaseCommand_PRODUCER:
-		return b.handleProducer(conn, &base)
+		handlerErr = b.handleProducer(conn, &base)
 	case pulsar.BaseCommand_SUBSCRIBE:
-		return b.handleSubscribe(conn, &base)
+		handlerErr = b.handleSubscribe(conn, &base)
 	case pulsar.BaseCommand_SEND:
 		payloadSection, _ := io.ReadAll(r)
-		return b.handleSend(conn, &base, payloadSection)
+		handlerErr = b.handleSend(conn, &base, payloadSection)
 	case pulsar.BaseCommand_FLOW:
-		return b.handleFlow(conn, &base)
+		handlerErr = b.handleFlow(conn, &base)
 	case pulsar.BaseCommand_ACK:
-		return b.handleAck(conn, &base)
+		handlerErr = b.handleAck(conn, &base)
+	case pulsar.BaseCommand_SEEK:
+		handlerErr = b.handleSeek(conn, &base)
+	case pulsar.BaseCommand_REDELIVER_UNACKNOWLEDGED_MESSAGES:
+		handlerErr = b.handleRedeliver(conn, &base)
+	case pulsar.BaseCommand_GET_LAST_MESSAGE_ID:
+		handlerErr = b.handleGetLastMessageID(conn, &base)
 	case pulsar.BaseCommand_PING:
-		return b.handlePing(conn, &base)
+		handlerErr = b.handlePing(conn, &base)
 	case pulsar.BaseCommand_PARTITIONED_METADATA:
-		return b.handlePartitionedMetadata(conn, &base)
+		handlerErr = b.handlePartitionedMetadata(conn, &base)
 	case pulsar.BaseCommand_LOOKUP:
-		return b.handleLookup(conn, &base)
+		handlerErr = b.handleLookup(conn, &base)
 	case pulsar.BaseCommand_CLOSE_PRODUCER:
-		return b.handleCloseProducer(conn, &base)
+		handlerErr = b.handleCloseProducer(conn, &base)
 	case pulsar.BaseCommand_CLOSE_CONSUMER:
-		return b.handleCloseConsumer(conn, &base)
+		handlerErr = b.handleCloseConsumer(conn, &base)
 	default:
-		b.cfg.Logger.Warn("unhandled command type", "type", base.GetType())
+		handlerErr = fmt.Errorf("unsupported command type %s", base.GetType())
+	}
+	if handlerErr == nil {
+		return nil
+	}
+	b.cfg.Logger.Warn("command rejected", "type", base.GetType(), "err", handlerErr)
+	if send := base.GetSend(); send != nil {
 		return b.writeCommand(conn, &pulsar.BaseCommand{
-			Type: pulsar.BaseCommand_ERROR.Enum(),
-			Error: &pulsar.CommandError{
-				RequestId: proto.Uint64(0),
-				Error:     pulsar.ServerError_UnsupportedVersionError.Enum(),
-				Message:   proto.String(fmt.Sprintf("unsupported command type %s", base.GetType())),
+			Type: pulsar.BaseCommand_SEND_ERROR.Enum(),
+			SendError: &pulsar.CommandSendError{
+				ProducerId: proto.Uint64(send.GetProducerId()),
+				SequenceId: proto.Uint64(send.GetSequenceId()),
+				Error:      pulsar.ServerError_UnknownError.Enum(),
+				Message:    proto.String(handlerErr.Error()),
 			},
 		})
+	}
+	return b.writeCommand(conn, commandError(&base, handlerErr))
+}
+
+func commandError(base *pulsar.BaseCommand, err error) *pulsar.BaseCommand {
+	requestID := uint64(0)
+	switch {
+	case base.GetProducer() != nil:
+		requestID = base.GetProducer().GetRequestId()
+	case base.GetSubscribe() != nil:
+		requestID = base.GetSubscribe().GetRequestId()
+	case base.GetLookupTopic() != nil:
+		requestID = base.GetLookupTopic().GetRequestId()
+	case base.GetPartitionMetadata() != nil:
+		requestID = base.GetPartitionMetadata().GetRequestId()
+	case base.GetSeek() != nil:
+		requestID = base.GetSeek().GetRequestId()
+	case base.GetGetLastMessageId() != nil:
+		requestID = base.GetGetLastMessageId().GetRequestId()
+	case base.GetCloseProducer() != nil:
+		requestID = base.GetCloseProducer().GetRequestId()
+	case base.GetCloseConsumer() != nil:
+		requestID = base.GetCloseConsumer().GetRequestId()
+	}
+	errorCode := pulsar.ServerError_UnknownError
+	if strings.HasPrefix(err.Error(), "unsupported command") {
+		errorCode = pulsar.ServerError_UnsupportedVersionError
+	}
+	return &pulsar.BaseCommand{
+		Type: pulsar.BaseCommand_ERROR.Enum(),
+		Error: &pulsar.CommandError{
+			RequestId: proto.Uint64(requestID),
+			Error:     errorCode.Enum(),
+			Message:   proto.String(err.Error()),
+		},
 	}
 }
