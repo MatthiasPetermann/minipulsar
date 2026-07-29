@@ -3,6 +3,8 @@ title: "minipulsar"
 weight: 1
 ---
 
+# minipulsar
+
 minipulsar is a compact, single-node broker that speaks the Apache Pulsar binary
 protocol. It is designed for learning, prototypes, and constrained edge
 deployments where a full Pulsar cluster is not appropriate. It preserves the

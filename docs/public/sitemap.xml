@@ -58,6 +58,9 @@
     <loc>//localhost:1313/development/workflow/</loc>
   </url>
   <url>
+    <loc>//localhost:1313/development/code-file-map/</loc>
+  </url>
+  <url>
     <loc>//localhost:1313/development/codebase-reference/</loc>
   </url>
   <url>

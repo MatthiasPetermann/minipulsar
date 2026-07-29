@@ -6,18 +6,18 @@
     <meta name="generator" content="Hugo 0.131.0">
     <meta name="generator" content="Relearn 4.2.5">
     <meta name="description" content="">
-    <title>SQLite storage model :: minipulsar Documentation</title>
-    <link href="/css/nucleus.css?1785358140" rel="stylesheet">
-    <link href="/css/fontawesome-all.min.css?1785358140" rel="stylesheet">
-    <link href="/css/featherlight.min.css?1785358140" rel="stylesheet">
-    <link href="/css/perfect-scrollbar.min.css?1785358140" rel="stylesheet">
-    <link href="/css/auto-complete.css?1785358140" rel="stylesheet">
-    <link href="/css/theme.css?1785358140" rel="stylesheet">
-    <link href="/css/theme-relearn-light.css?1785358140" rel="stylesheet" id="variant-style">
-    <link href="/css/ie.css?1785358140" rel="stylesheet">
-    <link href="/css/variant.css?1785358140" rel="stylesheet">
-    <link href="/css/print.css?1785358140" rel="stylesheet" media="print">
-    <script src="/js/variant.js?1785358140"></script>
+    <title>Code file map :: minipulsar Documentation</title>
+    <link href="/css/nucleus.css?1785358221" rel="stylesheet">
+    <link href="/css/fontawesome-all.min.css?1785358221" rel="stylesheet">
+    <link href="/css/featherlight.min.css?1785358221" rel="stylesheet">
+    <link href="/css/perfect-scrollbar.min.css?1785358221" rel="stylesheet">
+    <link href="/css/auto-complete.css?1785358221" rel="stylesheet">
+    <link href="/css/theme.css?1785358221" rel="stylesheet">
+    <link href="/css/theme-relearn-light.css?1785358221" rel="stylesheet" id="variant-style">
+    <link href="/css/ie.css?1785358221" rel="stylesheet">
+    <link href="/css/variant.css?1785358221" rel="stylesheet">
+    <link href="/css/print.css?1785358221" rel="stylesheet" media="print">
+    <script src="/js/variant.js?1785358221"></script>
     <script>
       // hack to let hugo tell us how to get to the root when using relativeURLs, it needs to be called *url= for it to do its magic:
       // https://github.com/gohugoio/hugo/blob/145b3fcce35fbac25c7033c91c1b7ae6d1179da8/transform/urlreplacers/absurlreplacer.go#L72
@@ -33,19 +33,19 @@
       var baseUriFull='localhost:1313/';
       variants.init( [ 'relearn-light' ] );
     </script>
-    <script src="/js/jquery.min.js?1785358140"></script>
+    <script src="/js/jquery.min.js?1785358221"></script>
   </head>
-  <body class="mobile-support" data-url="/reference/storage-model/">
+  <body class="mobile-support" data-url="/development/code-file-map/">
     <div id="body" class="default-animation">
       <div id="sidebar-overlay"></div>
       <div id="toc-overlay"></div>
       <nav id="topbar" class="highlightable">
         <div>
           <div class="navigation">
-             <a class="nav nav-next" href="/reference/cli-reference/" title="CLI reference (&#129106;)"><i class="fas fa-chevron-right fa-fw"></i></a>
+             <a class="nav nav-next" href="/development/codebase-reference/" title="Codebase reference (&#129106;)"><i class="fas fa-chevron-right fa-fw"></i></a>
           </div>
           <div class="navigation">
-             <a class="nav nav-prev" href="/reference/protocol-compatibility/" title="Protocol compatibility (&#129104;)"><i class="fas fa-chevron-left fa-fw"></i></a>
+             <a class="nav nav-prev" href="/development/workflow/" title="Development workflow (&#129104;)"><i class="fas fa-chevron-left fa-fw"></i></a>
           </div>
           <div id="breadcrumbs">
             <span id="sidebar-toggle-span">
@@ -55,16 +55,16 @@
             <ol class="links" itemscope itemtype="http://schema.org/BreadcrumbList">
               <meta itemprop="itemListOrder" content="Descending" />
               <li itemscope itemtype="https://schema.org/ListItem" itemprop="itemListElement"><meta itemprop="position" content="3" /><a itemprop="item" href="/"><span itemprop="name">minipulsar</span></a> > </li>
-              <li itemscope itemtype="https://schema.org/ListItem" itemprop="itemListElement"><meta itemprop="position" content="2" /><a itemprop="item" href="/reference/"><span itemprop="name">Reference</span></a> > </li>
-              <li itemscope itemtype="https://schema.org/ListItem" itemprop="itemListElement"><meta itemprop="position" content="1" /><a itemprop="item" href="/reference/storage-model/" aria-disabled="true"><span itemprop="name">SQLite storage model</span></a></li>
+              <li itemscope itemtype="https://schema.org/ListItem" itemprop="itemListElement"><meta itemprop="position" content="2" /><a itemprop="item" href="/development/"><span itemprop="name">Development and integration</span></a> > </li>
+              <li itemscope itemtype="https://schema.org/ListItem" itemprop="itemListElement"><meta itemprop="position" content="1" /><a itemprop="item" href="/development/code-file-map/" aria-disabled="true"><span itemprop="name">Code file map</span></a></li>
             </ol>
           </div>
           <div class="default-animation progress">
             <div class="wrapper">
 <nav id="TableOfContents">
   <ul>
-    <li><a href="#tables-and-invariants">Tables and invariants</a></li>
-    <li><a href="#query-performance">Query performance</a></li>
+    <li><a href="#read-a-feature-end-to-end">Read a feature end to end</a></li>
+    <li><a href="#test-map">Test map</a></li>
   </ul>
 </nav>
             </div>
@@ -77,64 +77,152 @@
           </div>
           <article>
 
-<h1>SQLite storage model</h1>
-<h2 id="tables-and-invariants">Tables and invariants</h2>
-<div class="mermaid" align="center">erDiagram
-    NAMESPACES ||--o{ TOPICS : contains
-    TOPICS ||--o{ MESSAGES : stores
-    TOPICS ||--o{ SUBSCRIPTIONS : owns
-    SUBSCRIPTIONS ||--|| SUBSCRIPTION_CURSOR : advances
-    SUBSCRIPTIONS ||--o{ SUBSCRIPTION_PENDING : tracks
-    NAMESPACES {
-      integer id PK
-      text tenant
-      text name
-    }
-    TOPICS {
-      integer id PK
-      integer namespace_id FK
-      text full_name UK
-    }
-    MESSAGES {
-      integer id PK
-      integer topic_id FK
-      blob payload
-      integer publish_time
-      integer sequence_id
-      text properties
-    }
-    SUBSCRIPTIONS {
-      integer topic_id PK
-      text name PK
-      text type
-      integer last_consumer_at
-    }
-    SUBSCRIPTION_CURSOR {
-      integer topic_id PK
-      text name PK
-      integer next_message_id
-    }
-    SUBSCRIPTION_PENDING {
-      integer topic_id PK
-      text name PK
-      integer message_id PK
-      integer consumer_id
-      integer delivered_at
-    }</div>
-<p><code>subscription_cursor.next_message_id</code> is a <strong>dispatch</strong> cursor. It moves when a
-claim succeeds, not when an acknowledgement arrives. <code>subscription_pending</code>
-records claimed-but-unacknowledged deliveries and prevents duplicate concurrent
-claims. Reset, disconnect, explicit redelivery, and timeout expiry remove pending
-records and rewind the cursor to the lowest requeued entry.</p>
-<p><code>messages.id</code> is the persistent entry ID exposed to Pulsar clients on ledger
-<code>0</code>. The payload column contains exactly the application bytes after Pulsar
-metadata framing; schema inspection is intentionally absent.</p>
-<h2 id="query-performance">Query performance</h2>
-<p>The schema indexes <code>(topic_id, id)</code> for ordered delivery,
-<code>(topic_id, publish_time)</code> for time positioning/retention, pending subscription
-keys, and pending delivery time. SQLite WAL improves read concurrency but still
-has a single writer. Size persistent deployments around write throughput, durable
-message volume, and maintenance windows.</p>
+<h1>Code file map</h1>
+<p>Use this page as the fastest entry point into the repository. Arrows show the
+normal direction of dependency and runtime calls; they do not imply that every
+file imports every other file in its cluster.</p>
+<div class="mermaid" align="center">flowchart TB
+    CLI["cmd/minipulsar/main.go<br/>CLI assembly, signals, listeners"]
+    PB["pb/PulsarApi.proto<br/>pb/PulsarApi.pb.go<br/>wire types"]
+    CLI --> B
+    CLI --> OBS
+    B --> PB
+    P --> PB
+
+    subgraph B["internal/broker: session and delivery core"]
+        T["types.go<br/>Config, Broker, state"]
+        S["server.go<br/>listeners, connections, shutdown"]
+        F["framing.go<br/>read, decode, dispatch, errors"]
+        H["handlers.go<br/>Pulsar commands"]
+        PU["publish.go<br/>persistent vs ephemeral route"]
+        D["delivery.go<br/>permits and scheduling"]
+        ST["state.go<br/>subscription state"]
+        NP["non_persistent.go<br/>best-effort delivery"]
+        CL["cleanup.go / ack_timeout.go<br/>requeue paths"]
+        PA["producer_access.go<br/>local arbitration"]
+        AU["auth.go / authorization.go<br/>JWT and policy gate"]
+        MA["maintenance.go<br/>retention scheduler"]
+        TH["throttle.go / stats.go<br/>operator controls"]
+        TY["subscription_types.go<br/>feature gate"]
+        S --> F --> H
+        H --> PU --> D
+        H --> ST
+        H --> AU
+        D --> ST
+        PU --> NP
+        CL --> D
+        MA --> CL
+        PA --> H
+        TH --> D
+        TY --> H
+    end
+
+    subgraph DB["internal/storage: SQLite durable state"]
+        SO["storage.go<br/>schema, insert, claim, ack, seek"]
+        SC["cleanup.go<br/>retention and timeout cleanup"]
+        SS["stats.go<br/>totals and backlog"]
+        SU["subscriptions.go<br/>activity touch"]
+        SO --> SC
+        SO --> SS
+        SU --> SO
+    end
+
+    B --> SO
+    MA --> SC
+    TH --> SS
+
+    subgraph P["internal/protocol and topic"]
+        WI["protocol/wire.go<br/>command and MESSAGE frames"]
+        PR["protocol/properties.go<br/>KeyValue conversion"]
+        TO["topic/topic.go<br/>normalization and parsing"]
+        WI --> PR
+        TO --> SO
+    end
+
+    H --> WI
+    H --> TO
+    D --> WI
+
+    subgraph M["internal/messaging: optional control plane"]
+        MC["config.go<br/>HCL decoding"]
+        MR["runtime.go<br/>compiled policy and bindings"]
+        MS["security_ir.go<br/>authorization IR"]
+        ML["lua_pool.go<br/>bounded Lua workers"]
+        MC --> MR
+        MR --> MS
+        MR --> ML
+    end
+
+    CLI --> MC
+    AU --> MS
+    H --> ML
+
+    subgraph OBS["operator adapters"]
+        LO["logging/logging.go<br/>structured logger"]
+        ME["metrics/metrics.go<br/>Prometheus snapshots"]
+        TU["tui/tui.go<br/>Bubble Tea control deck"]
+        LH["tui/log_hook.go<br/>log stream bridge"]
+        LO --> LH --> TU
+    end
+
+    B --> LO
+    TH --> ME
+    TH --> TU</div>
+<h2 id="read-a-feature-end-to-end">Read a feature end to end</h2>
+<table>
+<thead>
+<tr>
+<th>Question</th>
+<th>Start here</th>
+<th>Follow next</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Why did a client receive an error?</td>
+<td><code>broker/framing.go</code></td>
+<td><code>broker/handlers.go</code>, <code>protocol/wire.go</code></td>
+</tr>
+<tr>
+<td>Where was this message persisted?</td>
+<td><code>broker/publish.go</code></td>
+<td><code>storage/storage.go</code></td>
+</tr>
+<tr>
+<td>Why was a message replayed?</td>
+<td><code>broker/cleanup.go</code> or <code>ack_timeout.go</code></td>
+<td><code>storage/storage.go</code>, <code>storage/cleanup.go</code></td>
+</tr>
+<tr>
+<td>Why is a consumer idle?</td>
+<td><code>broker/delivery.go</code></td>
+<td><code>handlers.go</code> FLOW, <code>state.go</code></td>
+</tr>
+<tr>
+<td>Why was access denied?</td>
+<td><code>broker/authorization.go</code></td>
+<td><code>broker/auth.go</code>, <code>messaging/security_ir.go</code></td>
+</tr>
+<tr>
+<td>Why is producer latency high?</td>
+<td><code>broker/handlers.go</code> SEND</td>
+<td><code>messaging/lua_pool.go</code>, <code>storage/storage.go</code></td>
+</tr>
+<tr>
+<td>Why does a dashboard number look wrong?</td>
+<td><code>broker/stats.go</code></td>
+<td><code>storage/stats.go</code>, <code>metrics/metrics.go</code>, <code>tui/tui.go</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="test-map">Test map</h2>
+<p>Every handwritten package has focused tests. <code>socket_integration_test.go</code> is the
+cross-layer proof point for a real TCP session. Storage tests exercise actual
+temporary SQLite files. Start with the matching <code>*_test.go</code> file before changing
+an invariant, then add a socket test whenever a Pulsar client can observe the
+new behavior.</p>
+<p>For the exhaustive per-file explanation, continue to the
+<a href="../codebase-reference/">Codebase reference</a>.</p>
 
             <footer class="footline">
             </footer>
@@ -213,12 +301,12 @@ message volume, and maintenance windows.</p>
         <script>
           var contentLangs=['en'];
         </script>
-        <script src="/js/auto-complete.js?1785358140"></script>
-        <script src="/js/lunr.min.js?1785358140"></script>
-        <script src="/js/lunr.stemmer.support.min.js?1785358140"></script>
-        <script src="/js/lunr.multi.min.js?1785358140"></script>
-        <script src="/js/lunr.en.min.js?1785358140"></script>
-        <script src="/js/search.js?1785358140"></script>
+        <script src="/js/auto-complete.js?1785358221"></script>
+        <script src="/js/lunr.min.js?1785358221"></script>
+        <script src="/js/lunr.stemmer.support.min.js?1785358221"></script>
+        <script src="/js/lunr.multi.min.js?1785358221"></script>
+        <script src="/js/lunr.en.min.js?1785358221"></script>
+        <script src="/js/search.js?1785358221"></script>
       </div>
       <div id="content-wrapper" class="highlightable">
         <ul class="topics collapsible-menu">
@@ -238,14 +326,14 @@ message volume, and maintenance windows.</p>
           <li data-nav-id="/operations/runtime-failure-modes/" title="Runtime lifecycle and failure modes" class="dd-item"><a href="/operations/runtime-failure-modes/">Runtime lifecycle and failure modes<i class="fas fa-check read-icon"></i></a></li>
           <li data-nav-id="/operations/sqlite-runbook/" title="SQLite runbook" class="dd-item"><a href="/operations/sqlite-runbook/">SQLite runbook<i class="fas fa-check read-icon"></i></a></li>
           <li data-nav-id="/operations/lua-bindings/" title="Lua bindings and execution model" class="dd-item"><a href="/operations/lua-bindings/">Lua bindings and execution model<i class="fas fa-check read-icon"></i></a></li></ul></li>
-          <li data-nav-id="/development/" title="Development and integration" class="dd-item"><input type="checkbox" id="section-b4f82c41674389c8b9704f843893fe69" class="toggle"/><label for="section-b4f82c41674389c8b9704f843893fe69" ></label><a href="/development/">Development and integration<i class="fas fa-check read-icon"></i></a><ul>
+          <li data-nav-id="/development/" title="Development and integration" class="dd-item parent"><input type="checkbox" id="section-b4f82c41674389c8b9704f843893fe69" class="toggle" checked/><label for="section-b4f82c41674389c8b9704f843893fe69" ></label><a href="/development/">Development and integration<i class="fas fa-check read-icon"></i></a><ul>
           <li data-nav-id="/development/workflow/" title="Development workflow" class="dd-item"><a href="/development/workflow/">Development workflow<i class="fas fa-check read-icon"></i></a></li>
-          <li data-nav-id="/development/code-file-map/" title="Code file map" class="dd-item"><a href="/development/code-file-map/">Code file map<i class="fas fa-check read-icon"></i></a></li>
+          <li data-nav-id="/development/code-file-map/" title="Code file map" class="dd-item active"><a href="/development/code-file-map/">Code file map<i class="fas fa-check read-icon"></i></a></li>
           <li data-nav-id="/development/codebase-reference/" title="Codebase reference" class="dd-item"><a href="/development/codebase-reference/">Codebase reference<i class="fas fa-check read-icon"></i></a></li>
           <li data-nav-id="/development/test-coverage-and-gaps/" title="Test strategy, coverage, and gaps" class="dd-item"><a href="/development/test-coverage-and-gaps/">Test strategy, coverage, and gaps<i class="fas fa-check read-icon"></i></a></li></ul></li>
-          <li data-nav-id="/reference/" title="Reference" class="dd-item parent"><input type="checkbox" id="section-2239954301764a827b7fd6ccce9a99d7" class="toggle" checked/><label for="section-2239954301764a827b7fd6ccce9a99d7" ></label><a href="/reference/">Reference<i class="fas fa-check read-icon"></i></a><ul>
+          <li data-nav-id="/reference/" title="Reference" class="dd-item"><input type="checkbox" id="section-2239954301764a827b7fd6ccce9a99d7" class="toggle"/><label for="section-2239954301764a827b7fd6ccce9a99d7" ></label><a href="/reference/">Reference<i class="fas fa-check read-icon"></i></a><ul>
           <li data-nav-id="/reference/protocol-compatibility/" title="Protocol compatibility" class="dd-item"><a href="/reference/protocol-compatibility/">Protocol compatibility<i class="fas fa-check read-icon"></i></a></li>
-          <li data-nav-id="/reference/storage-model/" title="SQLite storage model" class="dd-item active"><a href="/reference/storage-model/">SQLite storage model<i class="fas fa-check read-icon"></i></a></li>
+          <li data-nav-id="/reference/storage-model/" title="SQLite storage model" class="dd-item"><a href="/reference/storage-model/">SQLite storage model<i class="fas fa-check read-icon"></i></a></li>
           <li data-nav-id="/reference/cli-reference/" title="CLI reference" class="dd-item"><a href="/reference/cli-reference/">CLI reference<i class="fas fa-check read-icon"></i></a></li>
           <li data-nav-id="/reference/wire-limits-and-metadata/" title="Wire framing, limits, and metadata fidelity" class="dd-item"><a href="/reference/wire-limits-and-metadata/">Wire framing, limits, and metadata fidelity<i class="fas fa-check read-icon"></i></a></li>
           <li data-nav-id="/reference/subscription-and-producer-behavior/" title="Subscription and producer behavior" class="dd-item"><a href="/reference/subscription-and-producer-behavior/">Subscription and producer behavior<i class="fas fa-check read-icon"></i></a></li></ul></li>
@@ -260,7 +348,7 @@ message volume, and maintenance windows.</p>
                 <span>&nbsp;</span>
                 <div class="select-style">
                   <select id="select-language" onchange="location = baseUri + this.value;">
-                    <option id="en" value="/reference/storage-model/" selected></option>
+                    <option id="en" value="/development/code-file-map/" selected></option>
                   </select>
                 </div>
                 <div class="select-clear"></div>
@@ -287,11 +375,11 @@ message volume, and maintenance windows.</p>
         </div>
       </div>
     </aside>
-    <script src="/js/clipboard.min.js?1785358140"></script>
-    <script src="/js/perfect-scrollbar.min.js?1785358140"></script>
-    <script src="/js/featherlight.min.js?1785358140"></script>
-    <script src="/js/jquery.svg.pan.zoom.js?1785358140"></script>
-    <script src="/js/mermaid.min.js?1785358140"></script>
+    <script src="/js/clipboard.min.js?1785358221"></script>
+    <script src="/js/perfect-scrollbar.min.js?1785358221"></script>
+    <script src="/js/featherlight.min.js?1785358221"></script>
+    <script src="/js/jquery.svg.pan.zoom.js?1785358221"></script>
+    <script src="/js/mermaid.min.js?1785358221"></script>
     <script>
       function useMermaid( config ){
         if (typeof mermaid != 'undefined' && typeof mermaid.mermaidAPI != 'undefined') {
@@ -304,6 +392,6 @@ message volume, and maintenance windows.</p>
       }
       useMermaid( JSON.parse("{}") );
     </script>
-    <script src="/js/theme.js?1785358140"></script>
+    <script src="/js/theme.js?1785358221"></script>
   </body>
 </html>

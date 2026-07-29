@@ -16,6 +16,14 @@ make generate # regenerate pb/PulsarApi.pb.go from pb/PulsarApi.proto make build
 Change discipline Define expected wire and storage semantics first.</description>
     </item>
     <item>
+      <title>Code file map</title>
+      <link>//localhost:1313/development/code-file-map/</link>
+      <pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate>
+      <guid>//localhost:1313/development/code-file-map/</guid>
+      <description>Use this page as the fastest entry point into the repository. Arrows show the normal direction of dependency and runtime calls; they do not imply that every file imports every other file in its cluster.
+flowchart TB CLI[&#34;cmd/minipulsar/main.goCLI assembly, signals, listeners&#34;] PB[&#34;pb/PulsarApi.protopb/PulsarApi.pb.gowire types&#34;] CLI --&gt; B CLI --&gt; OBS B --&gt; PB P --&gt; PB subgraph B[&#34;internal/broker: session and delivery core&#34;] T[&#34;types.goConfig, Broker, state&#34;] S[&#34;server.golisteners, connections, shutdown&#34;] F[&#34;framing.goread, decode, dispatch, errors&#34;</description>
+    </item>
+    <item>
       <title>Codebase reference</title>
       <link>//localhost:1313/development/codebase-reference/</link>
       <pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate>
