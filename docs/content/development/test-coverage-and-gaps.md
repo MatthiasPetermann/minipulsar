@@ -1,6 +1,6 @@
 ---
 title: "Test strategy, coverage, and gaps"
-weight: 43
+weight: 44
 ---
 
 ## Current test pyramid
