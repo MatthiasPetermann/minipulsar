@@ -215,11 +215,21 @@ Subscription start positions are driven by the Pulsar `SUBSCRIBE` command (`init
 - Go >= 1.21
 - `protoc` + `protoc-gen-go`
 
-Install the Go plugin if needed:
+Install the system packages required by `make generate`:
 
 ```bash
-go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-export PATH="$PATH:$HOME/go/bin"
+# Debian/Ubuntu
+sudo apt update
+sudo apt install -y make protobuf-compiler
+
+# Alpine
+sudo apk add make protobuf
+```
+
+Regenerate the Go bindings with:
+
+```bash
+make generate
 ```
 
 ### Tests
