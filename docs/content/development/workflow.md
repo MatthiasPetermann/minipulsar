@@ -3,8 +3,6 @@ title: "Development workflow"
 weight: 41
 ---
 
-# Development workflow
-
 ## Toolchain
 
 The module targets Go 1.21. Building generated protocol bindings requires

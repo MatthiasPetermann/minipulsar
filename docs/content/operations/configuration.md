@@ -3,8 +3,6 @@ title: "Configuration and lifecycle"
 weight: 31
 ---
 
-# Configuration and lifecycle
-
 ## Core flags
 
 | Flag | Purpose |
@@ -26,7 +24,9 @@ period of at least ten seconds.
 
 SQLite is the durable single-node log. Keep the database, `-wal`, and `-shm`
 files on the same local filesystem. Do not place a live database on an
-unreliable network share. Back up using a SQLite-consistent backup mechanism,
+unreliable network share. Retention controls later deletion, not initial durable
+publication; see [Persistence, retention, and deletion](../../concepts/persistence-and-retention/).
+Back up using a SQLite-consistent backup mechanism,
 not a blind copy while writers are active.
 
 The schema includes `schema_migrations`; startup applies additive schema setup.

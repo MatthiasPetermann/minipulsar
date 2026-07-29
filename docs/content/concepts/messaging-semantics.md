@@ -3,8 +3,6 @@ title: "Messaging semantics"
 weight: 22
 ---
 
-# Messaging semantics
-
 ## Persistent publish, delivery, and acknowledgement
 
 ```mermaid

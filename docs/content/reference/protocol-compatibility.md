@@ -3,8 +3,6 @@ title: "Protocol compatibility"
 weight: 51
 ---
 
-# Protocol compatibility
-
 minipulsar accepts Pulsar binary protocol frames over TCP or optional TLS. The
 table describes implemented server behavior, not a claim of full Apache Pulsar
 feature parity.

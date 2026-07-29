@@ -553,27 +553,6 @@ func (b *Broker) applyBindings(sourceTopic string, payload []byte) error {
 	return nil
 }
 
-// shouldPersistMessage decides if a message should be stored or only delivered
-// in-memory based on namespace retention and existing subscriptions.
-func (b *Broker) shouldPersistMessage(info topic.Info) bool {
-	if b.cfg.Messaging == nil {
-		return true
-	}
-	policy, ok := b.cfg.Messaging.PolicyForTopic(info)
-	if !ok {
-		return true
-	}
-	if policy.Retention > 0 {
-		return true
-	}
-	hasSubs, err := b.store.HasSubscriptions(info.FullName)
-	if err != nil {
-		b.cfg.Logger.Warn("subscription lookup failed", "topic", info.FullName, "err", err)
-		return true
-	}
-	return hasSubs
-}
-
 // handleFlow applies additional permits to a consumer, enabling delivery.
 // Pulsar uses permits for backpressure on shared subscriptions.
 func (b *Broker) handleFlow(conn net.Conn, base *pulsar.BaseCommand) error {

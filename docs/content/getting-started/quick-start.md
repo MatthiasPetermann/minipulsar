@@ -3,8 +3,6 @@ title: "Quick start"
 weight: 11
 ---
 
-# Quick start
-
 ## Build and run
 
 ```bash

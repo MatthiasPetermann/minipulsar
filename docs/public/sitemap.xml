@@ -22,6 +22,12 @@
     <loc>//localhost:1313/concepts/control-plane/</loc>
   </url>
   <url>
+    <loc>//localhost:1313/concepts/delivery-state-machine/</loc>
+  </url>
+  <url>
+    <loc>//localhost:1313/concepts/persistence-and-retention/</loc>
+  </url>
+  <url>
     <loc>//localhost:1313/operations/</loc>
   </url>
   <url>
@@ -31,7 +37,19 @@
     <loc>//localhost:1313/operations/security/</loc>
   </url>
   <url>
+    <loc>//localhost:1313/operations/authentication-authorization/</loc>
+  </url>
+  <url>
     <loc>//localhost:1313/operations/observability/</loc>
+  </url>
+  <url>
+    <loc>//localhost:1313/operations/runtime-failure-modes/</loc>
+  </url>
+  <url>
+    <loc>//localhost:1313/operations/sqlite-runbook/</loc>
+  </url>
+  <url>
+    <loc>//localhost:1313/operations/lua-bindings/</loc>
   </url>
   <url>
     <loc>//localhost:1313/development/</loc>
@@ -41,6 +59,9 @@
   </url>
   <url>
     <loc>//localhost:1313/development/codebase-reference/</loc>
+  </url>
+  <url>
+    <loc>//localhost:1313/development/test-coverage-and-gaps/</loc>
   </url>
   <url>
     <loc>//localhost:1313/reference/</loc>
@@ -53,6 +74,12 @@
   </url>
   <url>
     <loc>//localhost:1313/reference/cli-reference/</loc>
+  </url>
+  <url>
+    <loc>//localhost:1313/reference/wire-limits-and-metadata/</loc>
+  </url>
+  <url>
+    <loc>//localhost:1313/reference/subscription-and-producer-behavior/</loc>
   </url>
   <url>
     <loc>//localhost:1313/categories/</loc>

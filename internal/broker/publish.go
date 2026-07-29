@@ -7,8 +7,8 @@ import (
 	"minipulsar/internal/topic"
 )
 
-// publishMessage persists or delivers a message based on topic durability rules.
-// It also triggers subscription delivery in the storage-backed path.
+// publishMessage persists every persistent message and directly delivers
+// non-persistent messages. Retention controls later cleanup, never publication.
 func (b *Broker) publishMessage(info topic.Info, msg storage.Message) (storage.Message, error) {
 	if msg.PublishTime == 0 {
 		msg.PublishTime = time.Now().UnixMilli()
@@ -16,14 +16,10 @@ func (b *Broker) publishMessage(info topic.Info, msg storage.Message) (storage.M
 	msg.Topic = info.FullName
 
 	if info.Persistent {
-		if b.shouldPersistMessage(info) {
-			if err := b.store.InsertMessage(&msg); err != nil {
-				return msg, err
-			}
-			b.kickTopic(info.FullName)
-		} else {
-			msg.ID = b.nextNonPersistentID(info.FullName)
+		if err := b.store.InsertMessage(&msg); err != nil {
+			return msg, err
 		}
+		b.kickTopic(info.FullName)
 		return msg, nil
 	}
 

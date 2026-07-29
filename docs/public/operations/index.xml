@@ -11,25 +11,58 @@
       <link>//localhost:1313/operations/configuration/</link>
       <pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate>
       <guid>//localhost:1313/operations/configuration/</guid>
-      <description>Configuration and lifecycle Core flags Flag Purpose -addr, -tls-addr Plain and optional TLS Pulsar listener addresses. Empty disables a listener. -db SQLite database path. WAL, busy timeout, and foreign keys are enabled. -broker-url, -broker-url-tls URLs returned by LOOKUP. -max-frame, -max-message Inbound allocation and payload limits. -max-connections, -max-producers, -max-consumers Optional global resource caps; 0 disables each cap. -read-timeout, -write-timeout Per-frame network deadlines. -ack-timeout, -ack-timeout-check-interval Pending-delivery expiry and scan interval. -namespace-maintenance-interval Retention and stale-subscription maintenance cadence.</description>
+      <description>Core flags Flag Purpose -addr, -tls-addr Plain and optional TLS Pulsar listener addresses. Empty disables a listener. -db SQLite database path. WAL, busy timeout, and foreign keys are enabled. -broker-url, -broker-url-tls URLs returned by LOOKUP. -max-frame, -max-message Inbound allocation and payload limits. -max-connections, -max-producers, -max-consumers Optional global resource caps; 0 disables each cap. -read-timeout, -write-timeout Per-frame network deadlines. -ack-timeout, -ack-timeout-check-interval Pending-delivery expiry and scan interval. -namespace-maintenance-interval Retention and stale-subscription maintenance cadence.</description>
     </item>
     <item>
       <title>Optional TLS, JWT, and policy</title>
       <link>//localhost:1313/operations/security/</link>
       <pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate>
       <guid>//localhost:1313/operations/security/</guid>
-      <description>Optional TLS, JWT, and policy TLS and authentication are optional deployment modes. A local trusted network can run plaintext without an HCL messaging configuration; when a policy is configured, authorization is evaluated for producer creation and subscription.
-TLS Provide both -tls-cert and -tls-key to enable the TLS listener. The broker requires TLS 1.2 or newer. Configure -broker-url-tls to the externally reachable pulsar+ssl:// URL. TLS does not imply client-certificate authentication.
-JWT The built-in verifier accepts HS256 bearer tokens supplied in CONNECT auth data.</description>
+      <description>TLS and authentication are optional deployment modes. A local trusted network can run plaintext without an HCL messaging configuration; when a policy is configured, authorization is evaluated for producer creation and subscription.
+For token claim scope, role caching, strict/open behavior, and enforcement timing, read Authentication and authorization boundary.
+TLS Provide both -tls-cert and -tls-key to enable the TLS listener. The broker requires TLS 1.2 or newer. Configure -broker-url-tls to the externally reachable pulsar+ssl:// URL.</description>
+    </item>
+    <item>
+      <title>Authentication and authorization boundary</title>
+      <link>//localhost:1313/operations/authentication-authorization/</link>
+      <pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate>
+      <guid>//localhost:1313/operations/authentication-authorization/</guid>
+      <description>TLS, JWT parsing, and namespace authorization are independent optional layers. TLS encrypts transport when enabled; JWT roles are evaluated only when the HCL runtime contains a security block; authorization is checked when a producer or consumer is created, not for every later SEND, FLOW, or ACK.
+flowchart TD A[CONNECT auth_data] --&gt; B{Security IR configured?} B -- no --&gt; C[No role parsing required] B -- yes --&gt; D{HS256 token supplied and valid?</description>
     </item>
     <item>
       <title>Observability and TUI</title>
       <link>//localhost:1313/operations/observability/</link>
       <pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate>
       <guid>//localhost:1313/operations/observability/</guid>
-      <description>Observability and TUI Logs and Prometheus The logger supports text or JSON output. Use -log-level and -log-format for machine-readable integration. The optional Prometheus endpoint is configured with -metrics-addr, -metrics-path, -metrics-interval, and -metrics-top-topics.
+      <description>Logs and Prometheus The logger supports text or JSON output. Use -log-level and -log-format for machine-readable integration. The optional Prometheus endpoint is configured with -metrics-addr, -metrics-path, -metrics-interval, and -metrics-top-topics.
 Metrics report connected producers/consumers, durable object totals, pending messages, stored messages, top topic pressure, optional subscription backlog, and collector health. Topic and subscription labels are bounded by the top-N limit to avoid unbounded cardinality.
 Control deck Run with -tui to open the Bubble Tea operations interface.</description>
+    </item>
+    <item>
+      <title>Runtime lifecycle and failure modes</title>
+      <link>//localhost:1313/operations/runtime-failure-modes/</link>
+      <pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate>
+      <guid>//localhost:1313/operations/runtime-failure-modes/</guid>
+      <description>Listener, deadline, and shutdown model Plain and TLS listeners can run together. TLS requires both PEM files and TLS 1.2+, but has no client certificate authentication or certificate reload. -broker-url values are lookup advertisements only: they must be configured to the actual externally reachable scheme, host, and port.
+Each read applies a new read deadline before receiving an outer frame; each outbound command/message applies a write deadline. A peer that sends only part of a valid frame occupies its connection until read timeout.</description>
+    </item>
+    <item>
+      <title>SQLite runbook</title>
+      <link>//localhost:1313/operations/sqlite-runbook/</link>
+      <pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate>
+      <guid>//localhost:1313/operations/sqlite-runbook/</guid>
+      <description>Connection settings and capacity The store opens SQLite with WAL journal mode, a five-second busy timeout, foreign keys, and a database/sql pool capped at four open and idle connections. WAL allows readers while a writer commits, but SQLite remains a single-writer system. High producer fan-in, ACK churn, retention, and expensive statistics contend for that writer.
+Capacity planning must include:
+payload bytes plus metadata/property JSON and SQLite page overhead; one pending row per unacknowledged delivery per subscription; WAL growth during sustained writes and long readers; retention and backup headroom; and write latency under the configured busy timeout.</description>
+    </item>
+    <item>
+      <title>Lua bindings and execution model</title>
+      <link>//localhost:1313/operations/lua-bindings/</link>
+      <pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate>
+      <guid>//localhost:1313/operations/lua-bindings/</guid>
+      <description>Lua bindings are an in-process transformation feature, not a distributed function platform. Paths are resolved at process startup from its working directory; scripts are loaded once per worker and are not hot-reloaded.
+sequenceDiagram participant P as Producer participant B as Broker participant DB as Source storage participant W as Lua worker pool participant T as Target storage P-&gt;&gt;B: SEND(source payload) B-&gt;&gt;DB: Commit source message B-&gt;&gt;W: Submit task Note over B,W: Unbuffered queue: SEND waits if workers are busy W--&gt;&gt;B: transformed bytes or error alt transform succeeds B-&gt;&gt;T: Publish target bytes directly else transform fails B-&gt;&gt;B: Log warning; keep source committed end B--&gt;&gt;P: SEND_RECEIPT The pool has a fixed number of worker goroutines and an unbuffered task channel.</description>
     </item>
   </channel>
 </rss>

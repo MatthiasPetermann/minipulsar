@@ -11,7 +11,7 @@
       <link>//localhost:1313/concepts/architecture/</link>
       <pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate>
       <guid>//localhost:1313/concepts/architecture/</guid>
-      <description>Architecture Motivation and scope Apache Pulsar normally couples protocol brokers, metadata services, BookKeeper, and cluster coordination. minipulsar intentionally collapses that architecture into a single Go process and SQLite database. The trade-off is explicit: it provides a small operational footprint and familiar client protocol, not horizontal scale or replicated durability.
+      <description>Motivation and scope Apache Pulsar normally couples protocol brokers, metadata services, BookKeeper, and cluster coordination. minipulsar intentionally collapses that architecture into a single Go process and SQLite database. The trade-off is explicit: it provides a small operational footprint and familiar client protocol, not horizontal scale or replicated durability.
 Runtime layers flowchart LR Client[Pulsar client] --&gt; Listener[TCP or TLS listener] Listener --&gt; Broker[Broker session and command handlers] Broker --&gt; Storage[SQLite storage] Broker --&gt; Protocol[Protocol frame writer] Broker --&gt; Messaging[Optional HCL / JWT / Lua runtime] Broker --&gt; Metrics[Prometheus snapshot exporter] Broker --&gt; TUI[Optional Bubble Tea control deck] Protocol --&gt; Client cmd/minipulsar assembles runtime dependencies from CLI flags.</description>
     </item>
     <item>
@@ -19,15 +19,31 @@ Runtime layers flowchart LR Client[Pulsar client] --&gt; Listener[TCP or TLS lis
       <link>//localhost:1313/concepts/messaging-semantics/</link>
       <pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate>
       <guid>//localhost:1313/concepts/messaging-semantics/</guid>
-      <description>Messaging semantics Persistent publish, delivery, and acknowledgement sequenceDiagram participant P as Producer participant B as Broker participant DB as SQLite participant D as Delivery loop participant C as Consumer P-&gt;&gt;B: SEND(metadata + opaque bytes) B-&gt;&gt;B: Validate magic, CRC32C, metadata, size B-&gt;&gt;DB: Insert message transaction DB--&gt;&gt;B: entry id B--&gt;&gt;P: SEND_RECEIPT(entry id) B-&gt;&gt;D: Kick subscription states for topic D-&gt;&gt;DB: Claim batch, add pending rows, advance cursor DB--&gt;&gt;D: Claimed messages D--&gt;&gt;C: MESSAGE(entry id, metadata, payload) C-&gt;&gt;B: ACK individual or cumulative B-&gt;&gt;DB: Remove pending rows owned by consumer UID Persistent delivery is at-least-once.</description>
+      <description>Persistent publish, delivery, and acknowledgement sequenceDiagram participant P as Producer participant B as Broker participant DB as SQLite participant D as Delivery loop participant C as Consumer P-&gt;&gt;B: SEND(metadata + opaque bytes) B-&gt;&gt;B: Validate magic, CRC32C, metadata, size B-&gt;&gt;DB: Insert message transaction DB--&gt;&gt;B: entry id B--&gt;&gt;P: SEND_RECEIPT(entry id) B-&gt;&gt;D: Kick subscription states for topic D-&gt;&gt;DB: Claim batch, add pending rows, advance cursor DB--&gt;&gt;D: Claimed messages D--&gt;&gt;C: MESSAGE(entry id, metadata, payload) C-&gt;&gt;B: ACK individual or cumulative B-&gt;&gt;DB: Remove pending rows owned by consumer UID Persistent delivery is at-least-once.</description>
     </item>
     <item>
       <title>HCL and Lua control plane</title>
       <link>//localhost:1313/concepts/control-plane/</link>
       <pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate>
       <guid>//localhost:1313/concepts/control-plane/</guid>
-      <description>HCL and Lua control plane The messaging configuration is optional. It supplies three independent concerns: namespace authorization/retention policy, named Lua functions, and bindings that republish transformed bytes from a source topic to a target topic.
+      <description>The messaging configuration is optional. It supplies three independent concerns: namespace authorization/retention policy, named Lua functions, and bindings that republish transformed bytes from a source topic to a target topic.
 Configuration shape security { mode = &amp;#34;strict&amp;#34; } namespace &amp;#34;persistent://public/default&amp;#34; { produce = [&amp;#34;writer&amp;#34;] consume = [&amp;#34;reader&amp;#34;] retention_seconds = 300 subscription_timeout_seconds = 3600 } function &amp;#34;transform&amp;#34; { path = &amp;#34;transform.lua&amp;#34; max_runtime = &amp;#34;250ms&amp;#34; } binding { source = &amp;#34;persistent://public/default/input&amp;#34; function = &amp;#34;transform&amp;#34; target = &amp;#34;persistent://public/default/output&amp;#34; } The Lua source must expose handle(payload, ctx).</description>
+    </item>
+    <item>
+      <title>Delivery state machine and guarantees</title>
+      <link>//localhost:1313/concepts/delivery-state-machine/</link>
+      <pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate>
+      <guid>//localhost:1313/concepts/delivery-state-machine/</guid>
+      <description>The two durable delivery records Persistent delivery is represented by two independent records per subscription:
+The dispatch cursor is the next entry ID that a claim should examine. The pending set is the durable ownership record for messages already claimed for a consumer but not acknowledged. The cursor advances during ClaimBatch, not during ACK. This distinction makes multiple consumers safe: a message can move past the cursor while remaining pending, and another consumer&amp;rsquo;s claim excludes it through the pending set.</description>
+    </item>
+    <item>
+      <title>Persistence, retention, and deletion</title>
+      <link>//localhost:1313/concepts/persistence-and-retention/</link>
+      <pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate>
+      <guid>//localhost:1313/concepts/persistence-and-retention/</guid>
+      <description>Persistent publication is always durable first Every publish to persistent://... inserts a SQLite row before the producer receives its receipt. HCL retention policy controls later deletion, not whether the receipt points at a durable entry. A persistent topic name therefore always means the message entered the local durable log, subject to successful SQLite commit.
+flowchart TD A[Publish persistent topic] --&gt; B{Namespace policy exists?} B -- no --&gt; C[Insert SQLite message] B -- yes --&gt; C C --&gt; G[Kick persistent subscription delivery] G --&gt; H[Later maintenance applies retention policy] With retention_seconds = 0, the next maintenance pass may delete consumed or orphaned history quickly.</description>
     </item>
   </channel>
 </rss>

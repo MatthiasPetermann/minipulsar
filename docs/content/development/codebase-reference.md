@@ -3,8 +3,6 @@ title: "Codebase reference"
 weight: 42
 ---
 
-# Codebase reference
-
 This is the file-level maintenance map for the current repository. Generated
 code is documented by source and purpose rather than every generated symbol.
 All package paths are relative to the repository root.
@@ -94,8 +92,8 @@ already-attached state.
 ### `internal/broker/publish.go`
 
 Routes a normalized message to persistent SQLite insertion or ephemeral delivery.
-For persistent topics it decides whether policy permits storing messages without
-subscriptions, then wakes matching subscription delivery loops.
+Every persistent publish is stored before matching subscription delivery loops
+are woken; retention policy is applied later by maintenance.
 
 ### `internal/broker/delivery.go`
 
@@ -294,8 +292,8 @@ validation, and binding normalization.
 
 ### `internal/messaging/lua_pool_test.go`
 
-Tests worker execution, transform outputs, validation failures, and limits in
-the Lua adapter.
+Tests worker execution, transform outputs, and validation failures in the Lua
+adapter. Runtime saturation and timeout behavior remain integration-test gaps.
 
 ## Observability packages
 

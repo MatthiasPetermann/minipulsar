@@ -3,8 +3,6 @@ title: "Observability and TUI"
 weight: 33
 ---
 
-# Observability and TUI
-
 ## Logs and Prometheus
 
 The logger supports text or JSON output. Use `-log-level` and `-log-format` for

@@ -3,8 +3,6 @@ title: "SQLite storage model"
 weight: 52
 ---
 
-# SQLite storage model
-
 ## Tables and invariants
 
 ```mermaid

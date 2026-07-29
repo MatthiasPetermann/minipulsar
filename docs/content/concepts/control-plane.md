@@ -3,8 +3,6 @@ title: "HCL and Lua control plane"
 weight: 23
 ---
 
-# HCL and Lua control plane
-
 The messaging configuration is optional. It supplies three independent concerns:
 namespace authorization/retention policy, named Lua functions, and bindings that
 republish transformed bytes from a source topic to a target topic.
@@ -60,8 +58,9 @@ sequenceDiagram
 Bindings run synchronously after source publication and before the producer
 receipt is written. A function failure is logged and does not roll back the
 already persisted source message. Design transformations to be bounded, pure,
-and idempotent; avoid binding cycles because the runtime does not provide a
-cycle detector.
+and idempotent. Target publishing does not recursively evaluate bindings in the
+current implementation, but cyclic configurations are still difficult to reason
+about and should be avoided.
 
 ## Namespace policy consequences
 
@@ -69,5 +68,5 @@ cycle detector.
 - `retention_seconds` controls cleanup age for consumed and orphaned messages.
 - `subscription_timeout_seconds` removes subscriptions that have not been
   actively served for the configured duration.
-- Policies apply only to persistent namespace topics; non-persistent topics
-  remain memory-only delivery paths.
+- Produce/consume authorization applies to persistent and non-persistent topic
+  namespaces. Retention and maintenance apply only to persistent storage.

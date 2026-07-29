@@ -3,8 +3,6 @@ title: "minipulsar"
 weight: 1
 ---
 
-# minipulsar
-
 minipulsar is a compact, single-node broker that speaks the Apache Pulsar binary
 protocol. It is designed for learning, prototypes, and constrained edge
 deployments where a full Pulsar cluster is not appropriate. It preserves the
@@ -26,6 +24,9 @@ goal.
   [Codebase reference](development/codebase-reference/) and [Development workflow](development/workflow/).
 - **Control-plane integrator:** read [HCL and Lua control plane](concepts/control-plane/)
   before deploying topic bindings.
+- **Reliability reviewer:** start with [Delivery state machine](concepts/delivery-state-machine/),
+  [Persistence and retention](concepts/persistence-and-retention/), and the
+  [test coverage and gaps](development/test-coverage-and-gaps/).
 
 ## Design principles
 

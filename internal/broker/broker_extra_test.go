@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"minipulsar/internal/messaging"
+	"minipulsar/internal/storage"
 	"minipulsar/internal/topic"
 	pulsar "minipulsar/pb"
 )
@@ -137,5 +138,32 @@ func TestNonPersistentIDAndThroughput(t *testing.T) {
 	throughput := b.throughputPerSecond()
 	if throughput <= 0 {
 		t.Fatalf("expected throughput to be positive, got %f", throughput)
+	}
+}
+
+func TestPersistentPublishIsDurableWithZeroRetentionAndNoSubscription(t *testing.T) {
+	store := openTestStore(t)
+	b := New(store, Config{Messaging: &messaging.Runtime{
+		NamespacePolicies: map[string]messaging.NamespacePolicy{
+			"persistent://public/default": {},
+		},
+	}})
+	info, err := topic.Parse("persistent://public/default/audit")
+	if err != nil {
+		t.Fatalf("parse topic: %v", err)
+	}
+	message, err := b.publishMessage(info, storage.Message{Payload: []byte("durable")})
+	if err != nil {
+		t.Fatalf("publish message: %v", err)
+	}
+	if message.ID == 0 {
+		t.Fatal("persistent publish did not receive a SQLite entry ID")
+	}
+	stats, err := store.StatsSnapshot(1)
+	if err != nil {
+		t.Fatalf("storage stats: %v", err)
+	}
+	if stats.Messages != 1 {
+		t.Fatalf("stored messages = %d, want 1", stats.Messages)
 	}
 }

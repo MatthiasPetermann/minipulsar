@@ -3,8 +3,6 @@ title: "Architecture"
 weight: 21
 ---
 
-# Architecture
-
 ## Motivation and scope
 
 Apache Pulsar normally couples protocol brokers, metadata services, BookKeeper,

@@ -3,11 +3,12 @@ title: "Optional TLS, JWT, and policy"
 weight: 32
 ---
 
-# Optional TLS, JWT, and policy
-
 TLS and authentication are optional deployment modes. A local trusted network
 can run plaintext without an HCL messaging configuration; when a policy is
 configured, authorization is evaluated for producer creation and subscription.
+
+For token claim scope, role caching, strict/open behavior, and enforcement
+timing, read [Authentication and authorization boundary](../authentication-authorization/).
 
 ## TLS
 

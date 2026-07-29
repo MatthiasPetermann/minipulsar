@@ -3,8 +3,6 @@ title: "CLI reference"
 weight: 53
 ---
 
-# CLI reference
-
 ## Networking and identity
 
 | Flag | Default | Meaning |
