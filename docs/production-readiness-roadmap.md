@@ -9,7 +9,7 @@ minipulsar is a compact, single-node Pulsar-compatible broker for edge and proto
 - Persistent and non-persistent topics are available.
 - Persistent subscriptions use cursors, pending-delivery tracking, acknowledgements, and redelivery after a disconnect or acknowledgement timeout.
 - The Pulsar binary protocol supports the core producer and consumer flows.
-- Frame and message limits, read/write timeouts, CRC validation, TLS, and HS256 JWT validation are present.
+- Frame and message limits, read/write timeouts, and CRC validation are present. TLS and HS256 JWT validation are optional deployment features.
 - Unit tests, `go test -race ./...`, and `go vet ./...` pass.
 
 ## Risks and Gaps
@@ -51,11 +51,12 @@ Targeted positioning by `MessageId` or timestamp is not supported. At minimum, t
 - `Key_Shared` is rejected.
 - `SEEK`, negative acknowledgements, explicit redelivery, and last-message-ID support are absent.
 - Dead-letter and retry topics are absent.
-- Batching, compression, chunking, schemas, and transactions are absent.
+- Batching, compression, chunking, and transactions are absent.
+- Schemas are intentionally out of scope: minipulsar treats message payloads as opaque bytes.
 - Producer deduplication is absent.
 - There is no Pulsar admin API or Pulsar-style tenant, cluster, or topic administration.
 - Discovery, load balancing, replication, and cluster recovery are absent.
-- Authentication is limited to HS256 JWTs.
+- TLS and HS256 JWT authentication are optional and intentionally limited deployment features.
 - Non-persistent topics are broker-local and lose messages when no consumer is connected.
 
 ## Backend Strategy
@@ -75,7 +76,7 @@ Adding a backend should not be the next step. Storage and delivery semantics mus
 - Gracefully stop listeners, active connections, background jobs, metrics, and SQLite.
 - Handle unknown and invalid commands with Pulsar error responses.
 - Add limits for connections, producers, consumers, subscriptions, backlog, and payloads.
-- Enforce TLS and authentication before allocating resources, and add rate limiting.
+- Preserve optional TLS and authentication modes, and add rate limiting.
 - Run SQLite with `foreign_keys=on`.
 - Introduce versioned, transactional schema migrations.
 - Document and test backup, restore, and integrity checks.
@@ -106,7 +107,7 @@ Adding a backend should not be the next step. Storage and delivery semantics mus
 - Add delivery counts, dead-letter topics, and retry topics.
 - Implement `Key_Shared`.
 - Implement partitioned topics.
-- Support message batches, compression, and producer idempotency.
+- Support message batches, compression, and producer idempotency where they preserve opaque byte payloads.
 - Publish and maintain a compatibility matrix by client and feature.
 
 ### P4: Scale
